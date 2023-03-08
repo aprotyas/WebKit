@@ -187,7 +187,7 @@ void ProcessLauncher::launchProcess()
         bool disableLogging = true;
 #if __has_include(<WebKitAdditions/InternalBuildAdditions.h>)
         if (isInternalBuild())
-            disableLogging = false;
+            disableLogging = true;
 #endif
         xpc_dictionary_set_bool(bootstrapMessage.get(), "disable-logging", disableLogging);
     }

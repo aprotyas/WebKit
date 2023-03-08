@@ -47,6 +47,7 @@ OS_ENUM(_os_trace_commonmodes, os_trace_mode_t,
 typedef struct os_log_message_s {
     char padding[128];
     const char *subsystem;
+    const char *category;
 } *os_log_message_t;
 
 #endif

@@ -1387,7 +1387,7 @@
         (extension "com.apple.webkit.extension.mach")
         (global-name "com.apple.trustd.agent")))
 
-#if HAVE(SANDBOX_STATE_FLAGS)
+#if 0 && HAVE(SANDBOX_STATE_FLAGS)
 (with-filter (require-not (state-flag "DisableLogging"))
     (allow mach-lookup (global-name
         "com.apple.logd"
