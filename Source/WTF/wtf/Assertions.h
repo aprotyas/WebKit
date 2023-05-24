@@ -233,6 +233,7 @@ WTF_EXPORT_PRIVATE void WTFSetLogChannelLevel(WTFLogChannel*, WTFLogLevel);
 WTF_EXPORT_PRIVATE bool WTFWillLogWithLevel(WTFLogChannel*, WTFLogLevel);
 
 WTF_EXPORT_PRIVATE NEVER_INLINE void WTFGetBacktrace(void** stack, int* size);
+WTF_EXPORT_PRIVATE void WTFReportBacktraceWithConfigurableFrameLimits(int framesToShow, int framesToSkip);
 WTF_EXPORT_PRIVATE void WTFReportBacktraceWithPrefix(const char*);
 WTF_EXPORT_PRIVATE void WTFReportBacktrace(void);
 #ifdef __cplusplus

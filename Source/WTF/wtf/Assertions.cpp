@@ -278,6 +278,22 @@ public:
     }
 };
 
+namespace Internal
+{
+static constexpr int framesToShow = 31;
+static constexpr int framesToSkip = 2;
+}
+
+void WTFReportBacktraceWithConfigurableFrameLimits(int framesToShow, int framesToSkip)
+{
+    ASSERT_WITH_MESSAGE(framesToShow > framesToSkip, "Have to show more frames than were skipped. framesToShow: %d, framesToSkip: %d", framesToShow, framesToSkip);
+    int frames = framesToShow + framesToSkip;
+    Vector<void *> samples(frames);
+
+    WTFGetBacktrace(samples.data(), &frames);
+    WTFPrintBacktrace(&samples[framesToSkip], frames - framesToSkip);
+}
+
 void WTFReportBacktraceWithPrefix(const char* prefix)
 {
     CrashLogPrintStream out;
@@ -286,24 +302,20 @@ void WTFReportBacktraceWithPrefix(const char* prefix)
 
 void WTFReportBacktraceWithPrefixAndPrintStream(PrintStream& out, const char* prefix)
 {
-    static constexpr int framesToShow = 31;
-    static constexpr int framesToSkip = 2;
-    void* samples[framesToShow + framesToSkip];
-    int frames = framesToShow + framesToSkip;
+    void* samples[Internal::framesToShow + Internal::framesToSkip];
+    int frames = Internal::framesToShow + Internal::framesToSkip;
 
     WTFGetBacktrace(samples, &frames);
-    WTFPrintBacktraceWithPrefixAndPrintStream(out, samples + framesToSkip, frames - framesToSkip, prefix);
+    WTFPrintBacktraceWithPrefixAndPrintStream(out, samples + Internal::framesToSkip, frames - Internal::framesToSkip, prefix);
 }
 
 void WTFReportBacktrace()
 {
-    static constexpr int framesToShow = 31;
-    static constexpr int framesToSkip = 2;
-    void* samples[framesToShow + framesToSkip];
-    int frames = framesToShow + framesToSkip;
+    void* samples[Internal::framesToShow + Internal::framesToSkip];
+    int frames = Internal::framesToShow + Internal::framesToSkip;
 
     WTFGetBacktrace(samples, &frames);
-    WTFPrintBacktrace(samples + framesToSkip, frames - framesToSkip);
+    WTFPrintBacktrace(samples + Internal::framesToSkip, frames - Internal::framesToSkip);
 }
 
 void WTFPrintBacktraceWithPrefixAndPrintStream(PrintStream& out, void** stack, int size, const char* prefix)
@@ -598,10 +610,8 @@ void WTFInitializeLogChannelStatesFromString(WTFLogChannel* channels[], size_t c
 #if !RELEASE_LOG_DISABLED
 void WTFReleaseLogStackTrace(WTFLogChannel* channel)
 {
-    static constexpr int framesToShow = 32;
-    static constexpr int framesToSkip = 2;
-    void* stack[framesToShow + framesToSkip];
-    int frames = framesToShow + framesToSkip;
+    void* stack[Internal::framesToShow + Internal::framesToSkip];
+    int frames = Internal::framesToShow + Internal::framesToSkip;
     WTFGetBacktrace(stack, &frames);
     StackTraceSymbolResolver { { stack, static_cast<size_t>(frames) } }.forEach([&](int frameNumber, void* stackFrame, const char* name) {
 #if USE(OS_LOG)
