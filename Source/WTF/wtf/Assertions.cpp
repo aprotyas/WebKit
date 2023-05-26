@@ -280,18 +280,45 @@ public:
 
 namespace Internal
 {
+
 static constexpr int framesToShow = 31;
 static constexpr int framesToSkip = 2;
+
+static Ref<PrintStream> defaultStream()
+{
+    static NeverDestroyed<CrashLogPrintStream> stream;
+    return stream.get();
 }
 
-void WTFReportBacktraceWithConfigurableFrameLimits(int framesToShow, int framesToSkip)
+static StringView defaultPrefix()
 {
+    static NeverDestroyed<StringView> prefix { StringView::empty() };
+    return prefix.get();
+}
+
+} // namespace Internal
+
+namespace WTF
+{
+
+struct ReportBacktraceOptions {
+    int framesToShow { ::Internal::framesToShow };
+    int framesToSkip { ::Internal::framesToSkip };
+    StringView prefix { ::Internal::defaultPrefix() };
+    Ref<PrintStream> printStream { ::Internal::defaultStream() };
+};
+
+} // namespace WTF
+
+void WTFReportBacktraceWithOptions(const WTF::ReportBacktraceOptions& options = { })
+{
+    auto [framesToShow, framesToSkip, prefix, printStream] = options;
     ASSERT_WITH_MESSAGE(framesToShow > framesToSkip, "Have to show more frames than were skipped. framesToShow: %d, framesToSkip: %d", framesToShow, framesToSkip);
     int frames = framesToShow + framesToSkip;
     Vector<void *> samples(frames);
 
     WTFGetBacktrace(samples.data(), &frames);
-    WTFPrintBacktrace(&samples[framesToSkip], frames - framesToSkip);
+    WTFPrintBacktraceWithPrefixAndPrintStream(printStream.get(), &samples[framesToSkip], frames - framesToSkip, prefix.characters<char>());
 }
 
 void WTFReportBacktraceWithPrefix(const char* prefix)

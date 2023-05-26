@@ -160,6 +160,7 @@ enum class WTFLogChannelState : uint8_t { Off, On, OnWithAccumulation };
 enum class WTFLogLevel : uint8_t { Always, Error, Warning, Info, Debug };
 namespace WTF {
 class PrintStream;
+struct ReportBacktraceOptions;
 }
 #else
 typedef uint8_t WTFLogChannelState;
@@ -233,10 +234,10 @@ WTF_EXPORT_PRIVATE void WTFSetLogChannelLevel(WTFLogChannel*, WTFLogLevel);
 WTF_EXPORT_PRIVATE bool WTFWillLogWithLevel(WTFLogChannel*, WTFLogLevel);
 
 WTF_EXPORT_PRIVATE NEVER_INLINE void WTFGetBacktrace(void** stack, int* size);
-WTF_EXPORT_PRIVATE void WTFReportBacktraceWithConfigurableFrameLimits(int framesToShow, int framesToSkip);
 WTF_EXPORT_PRIVATE void WTFReportBacktraceWithPrefix(const char*);
 WTF_EXPORT_PRIVATE void WTFReportBacktrace(void);
 #ifdef __cplusplus
+WTF_EXPORT_PRIVATE void WTFReportBacktraceWithOptions(const WTF::ReportBacktraceOptions&);
 WTF_EXPORT_PRIVATE void WTFReportBacktraceWithPrefixAndPrintStream(WTF::PrintStream&, const char*);
 WTF_EXPORT_PRIVATE void WTFPrintBacktraceWithPrefixAndPrintStream(WTF::PrintStream&, void** stack, int size, const char* prefix);
 #endif
