@@ -286,7 +286,7 @@ void WTFReportBacktraceWithPrefix(const char* prefix)
 
 void WTFReportBacktraceWithPrefixAndPrintStream(PrintStream& out, const char* prefix)
 {
-    static constexpr int framesToShow = 31;
+    static constexpr int framesToShow = 80;
     static constexpr int framesToSkip = 2;
     void* samples[framesToShow + framesToSkip];
     int frames = framesToShow + framesToSkip;

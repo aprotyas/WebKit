@@ -2764,6 +2764,7 @@ static WebCore::IntDegrees activeOrientation(WKWebView *webView)
 
 - (void)_keyboardChangedWithInfo:(NSDictionary *)keyboardInfo adjustScrollView:(BOOL)adjustScrollView
 {
+    WTFReportBacktraceWithPrefix("(aprotyas)");
     NSValue *endFrameValue = [keyboardInfo objectForKey:UIKeyboardFrameEndUserInfoKey];
     if (!endFrameValue)
         return;
