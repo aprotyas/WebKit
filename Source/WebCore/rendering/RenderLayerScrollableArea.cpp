@@ -1009,18 +1009,47 @@ int RenderLayerScrollableArea::horizontalScrollbarHeight(OverlayScrollbarSizeRel
     return m_hBar->height();
 }
 
+static const char* overscrollBehaviorString(const OverscrollBehavior b)
+{
+    switch (b) {
+    case OverscrollBehavior::Auto:
+        return "OverscrollBehavior::Auto";
+    case OverscrollBehavior::Contain:
+        return "OverscrollBehavior::Contain";
+    case OverscrollBehavior::None:
+        return "OverscrollBehavior::None";
+    }
+    ASSERT_NOT_REACHED();
+}
+
 OverscrollBehavior RenderLayerScrollableArea::horizontalOverscrollBehavior() const
 {
-    if (m_layer.renderBox())
-        return m_layer.renderer().style().overscrollBehaviorX();
-    return OverscrollBehavior::Auto;
+    auto behavior = [&] {
+//        if (m_layer.renderBox() && m_layer.renderBox()->canBeScrolledAndHasScrollableArea()) {
+        if (m_layer.renderBox()) {
+            WTFLogAlways("[aprotyas] Passed m_layer.renderBox() check ---- %s", __PRETTY_FUNCTION__);
+            return m_layer.renderer().style().overscrollBehaviorX();
+        }
+        return OverscrollBehavior::Auto;
+    }();
+    
+    WTFLogAlways("[aprotyas] OverscrollBehavior: %s ---- %s", overscrollBehaviorString(behavior), __PRETTY_FUNCTION__);
+    return behavior;
 }
 
 OverscrollBehavior RenderLayerScrollableArea::verticalOverscrollBehavior() const
 {
-    if (m_layer.renderBox())
-        return m_layer.renderer().style().overscrollBehaviorY();
-    return OverscrollBehavior::Auto;
+    auto behavior = [&] {
+//        if (m_layer.renderBox() && m_layer.renderBox()->canBeScrolledAndHasScrollableArea()) {
+        if (m_layer.renderBox()) {
+            WTFLogAlways("[aprotyas] Passed m_layer.renderBox() check ---- %s", __PRETTY_FUNCTION__);
+            return m_layer.renderer().style().overscrollBehaviorY();
+        }
+        return OverscrollBehavior::Auto;
+    }();
+    
+    WTFLogAlways("[aprotyas] OverscrollBehavior: %s ---- %s", overscrollBehaviorString(behavior), __PRETTY_FUNCTION__);
+    return behavior;
 }
 
 ScrollbarWidth RenderLayerScrollableArea::scrollbarWidthStyle()  const

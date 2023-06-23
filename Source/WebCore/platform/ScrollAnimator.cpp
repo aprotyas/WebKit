@@ -164,11 +164,15 @@ bool ScrollAnimator::handleWheelEvent(const PlatformWheelEvent& wheelEvent)
     m_scrollController.updateGestureInProgressState(wheelEvent);
 #endif
 
-    if (processWheelEventForScrollSnap(wheelEvent))
+    if (processWheelEventForScrollSnap(wheelEvent)) {
+        WTFLogAlways("[aprotyas] processWheelEventForScrollSnap == true. What does that mean? %s", __PRETTY_FUNCTION__);
         return false;
+    }
 
-    if (m_scrollableArea.hasSteppedScrolling())
+    if (m_scrollableArea.hasSteppedScrolling()) {
+        WTFLogAlways("[aprotyas] hasSteppedScrolling == true. What does that mean? %s", __PRETTY_FUNCTION__);
         return handleSteppedScrolling(wheelEvent);
+    }
 
     return m_scrollController.handleWheelEvent(wheelEvent);
 }

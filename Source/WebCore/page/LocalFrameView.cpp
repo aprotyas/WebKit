@@ -6297,22 +6297,52 @@ void LocalFrameView::updateScrollbarSteps()
     }
 }
 
+static const char* overscrollBehaviorString(const OverscrollBehavior b)
+{
+    switch (b) {
+    case OverscrollBehavior::Auto:
+        return "OverscrollBehavior::Auto";
+    case OverscrollBehavior::Contain:
+        return "OverscrollBehavior::Contain";
+    case OverscrollBehavior::None:
+        return "OverscrollBehavior::None";
+    }
+    ASSERT_NOT_REACHED();
+}
+
 OverscrollBehavior LocalFrameView::horizontalOverscrollBehavior() const
 {
-    auto* document = m_frame->document();
-    auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
-    if (scrollingObject && renderView())
-        return scrollingObject->style().overscrollBehaviorX();
-    return OverscrollBehavior::Auto;
+    auto behavior = [&] {
+        auto* document = m_frame->document();
+        auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
+//        if (scrollingObject && renderView() && renderView()->canBeScrolledAndHasScrollableArea()) {
+        if (scrollingObject && renderView()) {
+            WTFLogAlways("[aprotyas] Passed scrollingObject && renderView() check ---- %s", __PRETTY_FUNCTION__);
+            return scrollingObject->style().overscrollBehaviorX();
+        }
+        return OverscrollBehavior::Auto;
+    }();
+    
+    WTFLogAlways("[aprotyas] OverscrollBehavior: %s ---- %s", overscrollBehaviorString(behavior), __PRETTY_FUNCTION__);
+    return behavior;
 }
 
 OverscrollBehavior LocalFrameView::verticalOverscrollBehavior()  const
 {
-    auto* document = m_frame->document();
-    auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
-    if (scrollingObject && renderView())
-        return scrollingObject->style().overscrollBehaviorY();
-    return OverscrollBehavior::Auto;
+    WTFReportBacktraceWithPrefix("[aprotyas-bt]");
+    auto behavior = [&] {
+        auto* document = m_frame->document();
+        auto scrollingObject = document && document->documentElement() ? document->documentElement()->renderer() : nullptr;
+//        if (scrollingObject && renderView() && renderView()->canBeScrolledAndHasScrollableArea()) {
+        if (scrollingObject && renderView()) {
+            WTFLogAlways("[aprotyas] Passed scrollingObject && renderView() check ---- %s", __PRETTY_FUNCTION__);
+            return scrollingObject->style().overscrollBehaviorY();
+        }
+        return OverscrollBehavior::Auto;
+    }();
+    
+    WTFLogAlways("[aprotyas] OverscrollBehavior: %s ---- %s", overscrollBehaviorString(behavior), __PRETTY_FUNCTION__);
+    return behavior;
 }
 
 ScrollbarWidth LocalFrameView::scrollbarWidthStyle()  const

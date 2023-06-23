@@ -378,6 +378,7 @@ void ScrollingEffectsController::updateGestureInProgressState(const PlatformWhee
 
 bool ScrollingEffectsController::handleWheelEvent(const PlatformWheelEvent& wheelEvent)
 {
+    WTFLogAlways("[aprotyas] %s", __PRETTY_FUNCTION__);
 #if ENABLE(KINETIC_SCROLLING)
     if (processWheelEventForKineticScrolling(wheelEvent))
         return true;

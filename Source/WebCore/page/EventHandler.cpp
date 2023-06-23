@@ -129,6 +129,8 @@
 #include <wtf/SetForScope.h>
 #include <wtf/StdLibExtras.h>
 
+#include <dbg_rendering.h>
+
 #if ENABLE(IOS_TOUCH_EVENTS)
 #include "PlatformTouchEventIOS.h"
 #endif
@@ -2892,6 +2894,9 @@ bool EventHandler::processWheelEventForScrolling(const PlatformWheelEvent& event
     // We do another check on the frame view because the event handler can run JS which results in the frame getting destroyed.
     auto* view = m_frame.view();
     
+    if (view)
+        WTFLogAlways("[aprotyas] Sanity check that view is non-null %s", __PRETTY_FUNCTION__);
+
     bool didHandleEvent = view ? handleWheelEventInScrollableArea(event, *view, eventHandling) : false;
     m_isHandlingWheelEvent = false;
     return didHandleEvent;
@@ -2993,13 +2998,16 @@ bool EventHandler::handleWheelEvent(const PlatformWheelEvent& wheelEvent, Option
 
     OptionSet<EventHandling> handling;
     bool handled = handleWheelEventInternal(wheelEvent, processingSteps, handling);
-    // wheelEventWasProcessedByMainThread() may have already been called via performDefaultWheelEventHandling(), but this ensures that it's always called if that code path doesn't run.
+    // wheelEventWasProcessedByMainThread() may have already been called via handleWheelEventForScrolling(), but this ensures that it's always called if that code path doesn't run.
     wheelEventWasProcessedByMainThread(wheelEvent, handling);
     return handled;
 }
 
 bool EventHandler::handleWheelEventInternal(const PlatformWheelEvent& event, OptionSet<WheelEventProcessingSteps> processingSteps, OptionSet<EventHandling>& handling)
 {
+//    if (event.deltaX() != -1000.0)
+//        return true;
+
     RefPtr document = m_frame.document();
     if (!document)
         return false;
@@ -3014,7 +3022,9 @@ bool EventHandler::handleWheelEventInternal(const PlatformWheelEvent& event, Opt
         return false;
 
 #if ENABLE(POINTER_LOCK)
+    WTFLogAlways("[aprotyas] ENABLE(POINTER_LOCK) %s", __PRETTY_FUNCTION__);
     if (m_frame.page()->pointerLockController().isLocked()) {
+        WTFLogAlways("[aprotyas] Sanity check that we're not in pointer lock %s", __PRETTY_FUNCTION__);
         m_frame.page()->pointerLockController().dispatchLockedWheelEvent(event);
         return true;
     }
@@ -3048,21 +3058,28 @@ bool EventHandler::handleWheelEventInternal(const PlatformWheelEvent& event, Opt
     RefPtr<Element> element = result.targetElement();
     WeakPtr<ScrollableArea> scrollableArea;
     bool isOverWidget = result.isOverWidget();
-
+    
+    WTFLogAlways("[aprotyas] element: %p ---- %s", element.get(), __PRETTY_FUNCTION__);
     // FIXME: Despite doing this up-front search for the correct scrollable area, we dispatch events via elements which
     // itself finds and tries to scroll overflow scrollers.
     determineWheelEventTarget(event, element, scrollableArea, isOverWidget);
+    WTFLogAlways("[aprotyas] element: %p ---- %s", element.get(), __PRETTY_FUNCTION__);
+    dumpRenderTree(*element);
 
     if (element) {
+        WTFLogAlways("[aprotyas] Element check passed ---- %s", __PRETTY_FUNCTION__);
         if (isOverWidget) {
             if (WeakPtr<Widget> widget = widgetForElement(*element)) {
+                WTFLogAlways("[aprotyas] Passing wheel event to widget %s", __PRETTY_FUNCTION__);
                 if (passWheelEventToWidget(event, *widget.get(), processingSteps))
                     return completeWidgetWheelEvent(event, widget, scrollableArea);
             }
         }
 
+//        UNUSED_PARAM(handling);
         auto isCancelable = processingSteps.contains(WheelEventProcessingSteps::BlockingDOMEventDispatch) ? Event::IsCancelable::Yes : Event::IsCancelable::No;
         if (!element->dispatchWheelEvent(event, handling, isCancelable)) {
+            WTFLogAlways("[aprotyas] element->dispatchWheelEvent returned false? ---- %s", __PRETTY_FUNCTION__);
             m_isHandlingWheelEvent = false;
             if (scrollableArea && scrollableArea->scrollShouldClearLatchedState()) {
                 // Web developer is controlling scrolling, so don't attempt to latch.
@@ -3073,7 +3090,8 @@ bool EventHandler::handleWheelEventInternal(const PlatformWheelEvent& event, Opt
 
             processWheelEventForScrollSnap(event, scrollableArea);
             return true;
-        }
+        } else
+            WTFLogAlways("[aprotyas] element->dispatchWheelEvent returned true! ---- %s", __PRETTY_FUNCTION__);
     }
 
     if (scrollableArea)
@@ -3085,23 +3103,32 @@ bool EventHandler::handleWheelEventInternal(const PlatformWheelEvent& event, Opt
 
     bool handledEvent = false;
     bool allowScrolling = m_currentWheelEventAllowsScrolling;
+    WTFLogAlways("[aprotyas] EventHandler::m_currentWheelEventAllowsScrolling == %s ---- %s", (allowScrolling ? "true" : "false"), __PRETTY_FUNCTION__);
 
 #if ENABLE(WHEEL_EVENT_LATCHING)
+    WTFLogAlways("[aprotyas] If it comes here, ask yourself: What is WHEEL_EVENT_LATCHING? %s", __PRETTY_FUNCTION__);
     if (allowScrolling)
         allowScrolling = m_frame.page()->scrollLatchingController().latchingAllowsScrollingInFrame(m_frame, scrollableArea);
 #endif
     auto adjustedWheelEvent = event;
     auto filteredDelta = adjustedWheelEvent.delta();
+    WTFLogAlways("[aprotyas] Before filteredDelta: (%f, %f) ---- %s", filteredDelta.width(), filteredDelta.height(), __PRETTY_FUNCTION__);
     filteredDelta = view->deltaForPropagation(filteredDelta);
-    if (view->shouldBlockScrollPropagation(filteredDelta))
+    WTFLogAlways("[aprotyas] After filteredDelta: (%f, %f) ---- %s", filteredDelta.width(), filteredDelta.height(), __PRETTY_FUNCTION__);
+    if (view->shouldBlockScrollPropagation(filteredDelta)) {
+        WTFLogAlways("[aprotyas] We early return at the view->shouldBlockScrollPropagation(filteredData) check. HUH? ---- %s", __PRETTY_FUNCTION__);
         return true;
+    }
 
     if (allowScrolling) {
+        WTFLogAlways("[aprotyas] Sanity check that we allowScrolling here %s", __PRETTY_FUNCTION__);
         // FIXME: processWheelEventForScrolling() is only called for FrameView scrolling, not overflow scrolling, which is confusing.
         adjustedWheelEvent = adjustedWheelEvent.copyWithDeltaAndVelocity(filteredDelta, adjustedWheelEvent.scrollingVelocity());
         handledEvent = processWheelEventForScrolling(adjustedWheelEvent, scrollableArea, handling);
         processWheelEventForScrollSnap(adjustedWheelEvent, scrollableArea);
     }
+    else
+        WTFLogAlways("[aprotyas] We don't allowScrolling? Scandalous %s", __PRETTY_FUNCTION__);
 
     return handledEvent;
 }
@@ -3217,6 +3244,7 @@ bool EventHandler::handleWheelEventInScrollableArea(const PlatformWheelEvent& wh
 {
     auto gestureState = updateWheelGestureState(wheelEvent, eventHandling);
     LOG_WITH_STREAM(Scrolling, stream << "EventHandler::handleWheelEventInScrollableArea() " << scrollableArea << " - eventHandling " << eventHandling << " -> gesture state " << gestureState);
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] EventHandler::handleWheelEventInScrollableArea() " << scrollableArea << " - eventHandling " << eventHandling << " -> gesture state " << gestureState);
     return scrollableArea.handleWheelEventForScrolling(wheelEvent, gestureState);
 }
 

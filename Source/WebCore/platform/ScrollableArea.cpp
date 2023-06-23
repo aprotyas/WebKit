@@ -240,8 +240,10 @@ void ScrollableArea::scrollPositionChanged(const ScrollPosition& position)
 
 bool ScrollableArea::handleWheelEventForScrolling(const PlatformWheelEvent& wheelEvent, std::optional<WheelScrollGestureState>)
 {
-    if (!isScrollableOrRubberbandable())
+    if (!isScrollableOrRubberbandable()) {
+        WTFLogAlways("[aprotyas] For whichever reason, this scrollable area is not scrollable or rubberbandable! %s", __PRETTY_FUNCTION__);
         return false;
+    }
 
     bool handledEvent = scrollAnimator().handleWheelEvent(wheelEvent);
     
@@ -948,19 +950,28 @@ TextStream& operator<<(TextStream& ts, const ScrollableArea& scrollableArea)
 FloatSize ScrollableArea::deltaForPropagation(const FloatSize& biasedDelta) const
 {
     auto filteredDelta = biasedDelta;
-    if (horizontalOverscrollBehaviorPreventsPropagation())
+    if (horizontalOverscrollBehaviorPreventsPropagation()) {
+        WTFLogAlways("[aprotyas] horizontalOverscrollBehaviorPreventsPropagation() == true ---- %s", __PRETTY_FUNCTION__);
         filteredDelta.setWidth(0);
-    if (verticalOverscrollBehaviorPreventsPropagation())
+    }
+    if (verticalOverscrollBehaviorPreventsPropagation()) {
+        WTFLogAlways("[aprotyas] verticalOverscrollBehaviorPreventsPropagation() == true ---- %s", __PRETTY_FUNCTION__);
         filteredDelta.setHeight(0);
+    }
     return filteredDelta;
 }
 
 bool ScrollableArea::shouldBlockScrollPropagation(const FloatSize& biasedDelta) const
 {
+//    WTFReportBacktraceWithPrefix("[aprotyas]");
     return ((horizontalOverscrollBehaviorPreventsPropagation() || verticalOverscrollBehaviorPreventsPropagation())
         && ((horizontalOverscrollBehaviorPreventsPropagation() && verticalOverscrollBehaviorPreventsPropagation())
         || (horizontalOverscrollBehaviorPreventsPropagation() && !biasedDelta.height()) || (verticalOverscrollBehaviorPreventsPropagation()
         && !biasedDelta.width())));
+    /*
+     return ((x() || y()) && ((x() && y()) || (x() && !biasedDelta.height()) || (y() && !biasedDelta.width())));
+     
+     */
 }
 
 } // namespace WebCore

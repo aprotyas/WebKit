@@ -1,0 +1,118 @@
+1   0x1054da8fc WTFReportBacktraceWithPrefix
+2   0x110521c30 WebKit::WebPageProxy::dispatchWheelEventWithoutScrolling(WebKit::WebWheelEvent const&, WTF::CompletionHandler<void (bool)>&&)
+3   0x10fd0ed64 -[WKWebView(WKViewInternalIOS) _scrollView:asynchronouslyHandleScrollEvent:completion:]
+4   0x110159014 WebKit::PageClientImpl::handleAsynchronousCancelableScrollEvent(UIScrollView*, UIScrollEvent*, void (bool) block_pointer)
+5   0x1100cefa8 WebKit::ScrollingTreeScrollingNodeDelegateIOS::handleAsynchronousCancelableScrollEvent(UIScrollView*, UIScrollEvent*, void (bool) block_pointer)
+6   0x1100cef08 -[WKScrollingNodeScrollViewDelegate _scrollView:asynchronouslyHandleScrollEvent:completion:]
+7   0x1915700c0 <redacted>
+8   0x1912745d8 <redacted>
+9   0x19049525c <redacted>
+10  0x190499d10 <redacted>
+11  0x1f094dd9c <redacted>
+12  0x190498e78 <redacted>
+13  0x190497160 <redacted>
+14  0x1904dec70 <redacted>
+15  0x191286fd4 <redacted>
+16  0x190a841ec <redacted>
+17  0x191174870 <redacted>
+18  0x191173dc8 <redacted>
+19  0x18e317e50 <redacted>
+20  0x18e322f84 <redacted>
+21  0x18e2b0dd4 <redacted>
+22  0x18e2c3104 <redacted>
+23  0x18e2c7da0 CFRunLoopRunSpecific
+24  0x1d17d3224 GSEventRunModal
+25  0x190738dc4 <redacted>
+26  0x190738a28 UIApplicationMain
+27  0x1f0886b00 MobileSafariUIMain
+28  0x1b111b4f8 <redacted>
+
+ auto WKViewInternalIOS::_scrollView:asynchronouslyHandleScrollEvent:completion:::(anonymous class)::operator()(bool) const -- handled: true
+
+1   0x1054da8fc WTFReportBacktraceWithPrefix
+2   0x10fd35170 -[WKWebView(WKViewInternalIOS) _scrollView:asynchronouslyHandleScrollEvent:completion:]::$_15::operator()(bool) const
+3   0x10fd35014 WTF::Detail::CallableWrapper<-[WKWebView(WKViewInternalIOS) _scrollView:asynchronouslyHandleScrollEvent:completion:]::$_15, void, bool>::call(bool)
+4   0x10e7c4728 WTF::Function<void (bool)>::operator()(bool) const
+5   0x110f2bd78 WTF::CompletionHandler<void (bool)>::operator()(bool)
+6   0x10f947384 decltype(std::declval<WTF::CompletionHandler<void (bool)>>()(std::declval<bool>())) std::__1::__invoke[abi:v160002]<WTF::CompletionHandler<void (bool)>, bool>(WTF::CompletionHandler<void (bool)>&&, bool&&)
+7   0x10f94734c decltype(auto) std::__1::__apply_tuple_impl[abi:v160002]<WTF::CompletionHandler<void (bool)>, std::__1::tuple<bool>, 0ul>(WTF::CompletionHandler<void (bool)>&&, std::__1::tuple<bool>&&, std::__1::__tuple_indices<0ul>)
+8   0x10f94730c decltype(auto) std::__1::apply[abi:v160002]<WTF::CompletionHandler<void (bool)>, std::__1::tuple<bool>>(WTF::CompletionHandler<void (bool)>&&, std::__1::tuple<bool>&&)
+9   0x1105aa460 void IPC::Connection::callReply<Messages::WebPage::DispatchWheelEventWithoutScrolling, WTF::CompletionHandler<void (bool)>>(IPC::Decoder&, WTF::CompletionHandler<void (bool)>&&)
+10  0x1105aa3f0 IPC::ConnectionAsyncReplyHandler IPC::Connection::makeAsyncReplyHandler<Messages::WebPage::DispatchWheelEventWithoutScrolling, WTF::CompletionHandler<void (bool)>>(WTF::CompletionHandler<void (bool)>&&, WTF::ThreadLikeAssertion)::'lambda'(IPC::Decoder*)::operator()(IPC::Decoder*)
+11  0x1105aa300 WTF::Detail::CallableWrapper<IPC::ConnectionAsyncReplyHandler IPC::Connection::makeAsyncReplyHandler<Messages::WebPage::DispatchWheelEventWithoutScrolling, WTF::CompletionHandler<void (bool)>>(WTF::CompletionHandler<void (bool)>&&, WTF::ThreadLikeAssertion)::'lambda'(IPC::Decoder*), void, IPC::Decoder*>::call(IPC::Decoder*)
+12  0x110059b10 WTF::Function<void (IPC::Decoder*)>::operator()(IPC::Decoder*) const
+13  0x1100485d4 WTF::CompletionHandler<void (IPC::Decoder*)>::operator()(IPC::Decoder*)
+14  0x110324f40 WebKit::AuxiliaryProcessProxy::sendMessage(WTF::UniqueRef<IPC::Encoder>&&, WTF::OptionSet<IPC::SendOption>, std::__1::optional<IPC::ConnectionAsyncReplyHandler>, WebKit::AuxiliaryProcessProxy::ShouldStartProcessThrottlerActivity)::$_5::operator()(IPC::Decoder*)
+15  0x110324e64 WTF::Detail::CallableWrapper<WebKit::AuxiliaryProcessProxy::sendMessage(WTF::UniqueRef<IPC::Encoder>&&, WTF::OptionSet<IPC::SendOption>, std::__1::optional<IPC::ConnectionAsyncReplyHandler>, WebKit::AuxiliaryProcessProxy::ShouldStartProcessThrottlerActivity)::$_5, void, IPC::Decoder*>::call(IPC::Decoder*)
+16  0x110059b10 WTF::Function<void (IPC::Decoder*)>::operator()(IPC::Decoder*) const
+17  0x1100485d4 WTF::CompletionHandler<void (IPC::Decoder*)>::operator()(IPC::Decoder*)
+18  0x1118d1cd8 IPC::Connection::dispatchMessage(IPC::Decoder&)
+19  0x1118d22b4 IPC::Connection::dispatchMessage(std::__1::unique_ptr<IPC::Decoder, std::__1::default_delete<IPC::Decoder>>)
+20  0x1118d2978 IPC::Connection::dispatchIncomingMessages()
+21  0x1118f0420 IPC::Connection::enqueueIncomingMessage(std::__1::unique_ptr<IPC::Decoder, std::__1::default_delete<IPC::Decoder>>)::$_16::operator()() const
+22  0x1118f0360 WTF::Detail::CallableWrapper<IPC::Connection::enqueueIncomingMessage(std::__1::unique_ptr<IPC::Decoder, std::__1::default_delete<IPC::Decoder>>)::$_16, void>::call()
+23  0x105504f20 WTF::Function<void ()>::operator()() const
+24  0x1055a05dc WTF::RunLoop::performWork()
+25  0x1055a4fbc WTF::RunLoop::performWork(void*)
+26  0x18e317e50 <redacted>
+27  0x18e322f84 <redacted>
+28  0x18e2b0d74 <redacted>
+29  0x18e2c3104 <redacted>
+30  0x18e2c7da0 CFRunLoopRunSpecific
+31  0x1d17d3224 GSEventRunModal
+
+----------
+
+
+1   0x117273770 non-virtual thunk to WebCore::LocalFrameView::verticalOverscrollBehavior() const
+2   0x11734f814 WebCore::ScrollableArea::shouldBlockScrollPropagation(WebCore::FloatSize const&) const
+3   0x117234298 WebCore::EventHandler::handleWheelEventInternal(WebCore::PlatformWheelEvent const&, WTF::OptionSet<WebCore::WheelEventProcessingSteps>, WTF::OptionSet<WebCore::EventHandling>&)
+4   0x117233b84 WebCore::EventHandler::handleWheelEvent(WebCore::PlatformWheelEvent const&, WTF::OptionSet<WebCore::WheelEventProcessingSteps>)
+5   0x1177f0ec8 WebCore::UserInputBridge::handleWheelEvent(WebCore::PlatformWheelEvent const&, WTF::OptionSet<WebCore::WheelEventProcessingSteps>, WebCore::InputSource)
+6   0x108271a68 WebKit::WebPage::wheelEvent(WebKit::WebWheelEvent const&, WTF::OptionSet<WebCore::WheelEventProcessingSteps>, WebKit::EventDispatcher::WheelEventOrigin)
+7   0x108271b1c WebKit::WebPage::dispatchWheelEventWithoutScrolling(WebKit::WebWheelEvent const&, WTF::CompletionHandler<void (bool)>&&)
+8   0x10829d4b4 void IPC::handleMessageAsync<Messages::WebPage::DispatchWheelEventWithoutScrolling, WebKit::WebPage, WebKit::WebPage, void (WebKit::WebWheelEvent const&, WTF::CompletionHandler<void (bool)>&&)>(IPC::Connection&, IPC::Decoder&, WebKit::WebPage*, void (WebKit::WebPage::*)(WebKit::WebWheelEvent const&, WTF::CompletionHandler<void (bool)>&&))
+9   0x10828fa60 WebKit::WebPage::didReceiveWebPageMessage(IPC::Connection&, IPC::Decoder&)
+10  0x1083cd9d0 IPC::MessageReceiverMap::dispatchMessage(IPC::Connection&, IPC::Decoder&)
+11  0x107ff8aac WebKit::WebProcess::didReceiveMessage(IPC::Connection&, IPC::Decoder&)
+12  0x1083c8d90 IPC::Connection::dispatchMessage(std::__1::unique_ptr<IPC::Decoder, std::__1::default_delete<IPC::Decoder>>)
+13  0x1083c8fb0 IPC::Connection::dispatchOneIncomingMessage()
+14  0x10d4d34ec WTF::RunLoop::performWork()
+15  0x10d4d4328 WTF::RunLoop::performWork(void*)
+16  0x1afd384b0 <redacted>
+17  0x1afd435e4 <redacted>
+18  0x1afcd13d4 <redacted>
+19  0x1afce3764 <redacted>
+20  0x1afce8400 CFRunLoopRunSpecific
+21  0x1aec99934 <redacted>
+22  0x1aec997c8 <redacted>
+23  0x219491e80 <redacted>
+24  0x21949418c <redacted>
+25  0x21949436c <redacted>
+26  0x107b31b84 WebKit::XPCServiceMain(int, char const**)
+27  0x1d2d3a4f8 <redacted>
+
+
+1   0x117273770 non-virtual thunk to WebCore::LocalFrameView::verticalOverscrollBehavior() const
+2   0x1172ffd48 WebCore::AsyncScrollingCoordinator::setScrollingNodeScrollableAreaGeometry(unsigned long long, WebCore::ScrollableArea&)
+3   0x1176ae898 WebCore::RenderLayerCompositor::updateScrollingNodeForScrollingRole(WebCore::RenderLayer&, WebCore::ScrollingTreeState&, WTF::OptionSet<WebCore::RenderLayerCompositor::ScrollingNodeChangeFlags>)
+4   0x1176a8634 WebCore::RenderLayerCompositor::updateScrollCoordinationForLayer(WebCore::RenderLayer&, WebCore::RenderLayer const*, WebCore::ScrollingTreeState&, WTF::OptionSet<WebCore::RenderLayerCompositor::ScrollingNodeChangeFlags>)
+5   0x1176a5e48 WebCore::RenderLayerCompositor::updateBackingAndHierarchy(WebCore::RenderLayer&, WTF::Vector<WTF::Ref<WebCore::GraphicsLayer, WTF::RawPtrTraits<WebCore::GraphicsLayer>>, 0ul, WTF::CrashOnOverflow, 16ul, WTF::FastMalloc>&, WebCore::RenderLayerCompositor::UpdateBackingTraversalState&, WebCore::ScrollingTreeState&, WTF::OptionSet<WebCore::RenderLayerCompositor::UpdateLevel>)
+6   0x1176a3f58 WebCore::RenderLayerCompositor::updateCompositingLayers(WebCore::CompositingUpdateType, WebCore::RenderLayer*)
+7   0x117263960 WebCore::LocalFrameView::didLayout(WTF::WeakPtr<WebCore::RenderElement, WTF::DefaultWeakPtrImpl>)
+8   0x117274504 WebCore::LocalFrameViewLayoutContext::performLayout()
+9   0x117c8902c WebCore::LocalFrameViewLayoutContext::layout()
+10  0x11735c510 WebCore::ThreadTimers::sharedTimerFiredInternal()
+11  0x117390724 WebCore::timerFired(__CFRunLoopTimer*, void*)
+12  0x1afd31060 <redacted>
+13  0x1afcf139c <redacted>
+14  0x1afc9ad0c <redacted>
+15  0x1afce3b68 <redacted>
+16  0x1afce8400 CFRunLoopRunSpecific
+17  0x1aec99934 <redacted>
+18  0x1aec997c8 <redacted>
+19  0x219491e80 <redacted>
+20  0x21949418c <redacted>
+21  0x21949436c <redacted>
+22  0x107b31b84 WebKit::XPCServiceMain(int, char const**)
+23  0x1d2d3a4f8 <redacted>

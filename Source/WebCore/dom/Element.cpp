@@ -518,6 +518,7 @@ bool Element::dispatchMouseEvent(const PlatformMouseEvent& platformEvent, const 
 bool Element::dispatchWheelEvent(const PlatformWheelEvent& platformEvent, OptionSet<EventHandling>& processing, Event::IsCancelable isCancelable)
 {
     auto event = WheelEvent::create(platformEvent, document().windowProxy(), isCancelable);
+    WTFLogAlways("[aprotyas] delta == (%f, %f) ---- %s", event->deltaX(), event->deltaY(), __PRETTY_FUNCTION__);
 
     // Events with no deltas are important because they convey platform information about scroll gestures
     // and momentum beginning or ending. However, those events should not be sent to the DOM since some

@@ -1970,8 +1970,15 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
         overridePhase = WebKit::WebWheelEvent::PhaseBegan;
     auto event = WebIOSEventFactory::createWebWheelEvent(scrollEvent, _contentView.get(), overridePhase);
 
+    auto booleanString = [](bool flag) {
+        return flag ? "true" : "false";
+    };
     _wheelEventCountInCurrentScrollGesture++;
-    _page->dispatchWheelEventWithoutScrolling(event, [weakSelf = WeakObjCPtr<WKWebView>(self), strongCompletion = makeBlockPtr(completion), isCancelable, isHandledByDefault](bool handled) {
+    _page->dispatchWheelEventWithoutScrolling(event, [weakSelf = WeakObjCPtr<WKWebView>(self), strongCompletion = makeBlockPtr(completion), isCancelable, isHandledByDefault, booleanString](bool handled) {
+//        ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] WKWebView asynchronouslyHandleScrollEvent -- handled: " << (handled ? "true" : "false"));
+        WTFLogAlways("[aprotyas] %s -- handled: %s, isHandledByDefault: %s, isCancelable: %s", __PRETTY_FUNCTION__, booleanString(handled), booleanString(isHandledByDefault), booleanString(isCancelable));
+//        WTFReportBacktraceWithPrefix("[aprotyas]");
+//        handled = false;
         auto strongSelf = weakSelf.get();
         if (!strongSelf) {
             strongCompletion(isHandledByDefault);
@@ -1981,12 +1988,16 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
         if (isCancelable) {
             if (!strongSelf->_currentScrollGestureState)
                 strongSelf->_currentScrollGestureState = handled ? WebCore::WheelScrollGestureState::Blocking : WebCore::WheelScrollGestureState::NonBlocking;
+            WTFLogAlways("[aprotyas] isHandledByDefault || handled == %s ---- %s", booleanString(isHandledByDefault || handled), __PRETTY_FUNCTION__);
             strongCompletion(isHandledByDefault || handled);
-        }
+        } else
+            WTFLogAlways("[aprotyas] Woot woot woot ---- %s", __PRETTY_FUNCTION__);
     });
 
-    if (!isCancelable)
+    if (!isCancelable) {
+        WTFLogAlways("[aprotyas] isCancelable == %s, isHandledByDefault == %s ---- %s", booleanString(isCancelable), booleanString(isHandledByDefault), __PRETTY_FUNCTION__);
         completion(isHandledByDefault);
+    }
 }
 #endif // HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
 
