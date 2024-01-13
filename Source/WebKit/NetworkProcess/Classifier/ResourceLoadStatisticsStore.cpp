@@ -26,8 +26,6 @@
 #include "config.h"
 #include "ResourceLoadStatisticsStore.h"
 
-#if ENABLE(TRACKING_PREVENTION)
-
 #include "ITPThirdPartyData.h"
 #include "Logging.h"
 #include "NetworkProcess.h"
@@ -42,6 +40,7 @@
 #include <WebCore/DocumentStorageAccess.h>
 #include <WebCore/KeyedCoding.h>
 #include <WebCore/NetworkStorageSession.h>
+#include <WebCore/OrganizationStorageAccessPromptQuirk.h>
 #include <WebCore/ResourceLoadStatistics.h>
 #include <WebCore/SQLiteDatabase.h>
 #include <WebCore/SQLiteStatement.h>
@@ -589,8 +588,6 @@ void ResourceLoadStatisticsStore::updateClientSideCookiesAgeCap()
 {
     ASSERT(!RunLoop::isMain());
 
-#if ENABLE(TRACKING_PREVENTION)
-    
     Seconds capTime;
 #if ENABLE(JS_COOKIE_CHECKING)
     capTime = m_parameters.clientSideCookiesForLinkDecorationTargetPageAgeCapTime;
@@ -604,7 +601,6 @@ void ResourceLoadStatisticsStore::updateClientSideCookiesAgeCap()
                 storageSession->setAgeCapForClientSideCookies(seconds);
         }
     });
-#endif
 }
 
 bool ResourceLoadStatisticsStore::shouldRemoveDataRecords() const
@@ -1648,7 +1644,7 @@ bool ResourceLoadStatisticsStore::hasStorageAccess(const TopFrameDomain& topFram
     return relationshipExists(scopedStatement, domainID(subFrameDomain), topFrameDomain);
 }
 
-void ResourceLoadStatisticsStore::hasStorageAccess(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, std::optional<FrameIdentifier> frameID, PageIdentifier pageID, CompletionHandler<void(bool)>&& completionHandler)
+void ResourceLoadStatisticsStore::hasStorageAccess(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, std::optional<FrameIdentifier> frameID, PageIdentifier pageID, CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction, CompletionHandler<void(bool)>&& completionHandler)
 {
     ASSERT(!RunLoop::isMain());
 
@@ -1658,7 +1654,7 @@ void ResourceLoadStatisticsStore::hasStorageAccess(SubFrameDomain&& subFrameDoma
         return;
     }
 
-    switch (cookieAccess(subFrameDomain, topFrameDomain)) {
+    switch (cookieAccess(subFrameDomain, topFrameDomain, canRequestStorageAccessWithoutUserInteraction)) {
     case CookieAccess::CannotRequest:
         completionHandler(false);
         return;
@@ -1685,7 +1681,7 @@ void ResourceLoadStatisticsStore::hasStorageAccess(SubFrameDomain&& subFrameDoma
     });
 }
 
-void ResourceLoadStatisticsStore::requestStorageAccess(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, FrameIdentifier frameID, PageIdentifier pageID, StorageAccessScope scope, CompletionHandler<void(StorageAccessStatus)>&& completionHandler)
+void ResourceLoadStatisticsStore::requestStorageAccess(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, FrameIdentifier frameID, PageIdentifier pageID, StorageAccessScope scope, CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction, CompletionHandler<void(StorageAccessStatus)>&& completionHandler)
 {
     ASSERT(!RunLoop::isMain());
 
@@ -1695,7 +1691,7 @@ void ResourceLoadStatisticsStore::requestStorageAccess(SubFrameDomain&& subFrame
         return completionHandler(StorageAccessStatus::CannotRequestAccess);
     }
 
-    switch (cookieAccess(subFrameDomain, topFrameDomain)) {
+    switch (cookieAccess(subFrameDomain, topFrameDomain, canRequestStorageAccessWithoutUserInteraction)) {
     case CookieAccess::CannotRequest:
         if (UNLIKELY(debugLoggingEnabled())) {
             RELEASE_LOG_INFO(ITPDebug, "Cannot grant storage access to %" PRIVATE_LOG_STRING " since its cookies are blocked in third-party contexts and it has not received user interaction as first-party.", subFrameDomain.string().utf8().data());
@@ -1742,12 +1738,12 @@ void ResourceLoadStatisticsStore::requestStorageAccess(SubFrameDomain&& subFrame
         return completionHandler(StorageAccessStatus::CannotRequestAccess);
     }
 
-    grantStorageAccessInternal(WTFMove(subFrameDomain), WTFMove(topFrameDomain), frameID, pageID, userWasPromptedEarlier, scope, [completionHandler = WTFMove(completionHandler)] (StorageAccessWasGranted wasGranted) mutable {
+    grantStorageAccessInternal(WTFMove(subFrameDomain), WTFMove(topFrameDomain), frameID, pageID, userWasPromptedEarlier, scope, canRequestStorageAccessWithoutUserInteraction, [completionHandler = WTFMove(completionHandler)] (StorageAccessWasGranted wasGranted) mutable {
         completionHandler(wasGranted == StorageAccessWasGranted::Yes ? StorageAccessStatus::HasAccess : StorageAccessStatus::CannotRequestAccess);
     });
 }
 
-void ResourceLoadStatisticsStore::requestStorageAccessUnderOpener(DomainInNeedOfStorageAccess&& domainInNeedOfStorageAccess, PageIdentifier openerPageID, OpenerDomain&& openerDomain)
+void ResourceLoadStatisticsStore::requestStorageAccessUnderOpener(DomainInNeedOfStorageAccess&& domainInNeedOfStorageAccess, PageIdentifier openerPageID, OpenerDomain&& openerDomain, CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction)
 {
     ASSERT(domainInNeedOfStorageAccess != openerDomain);
     ASSERT(!RunLoop::isMain());
@@ -1760,7 +1756,7 @@ void ResourceLoadStatisticsStore::requestStorageAccessUnderOpener(DomainInNeedOf
         debugBroadcastConsoleMessage(MessageSource::ITPDebug, MessageLevel::Info, makeString("[ITP] Storage access was granted for '"_s, domainInNeedOfStorageAccess.string(), "' under opener page from '"_s, openerDomain.string(), "', with user interaction in the opened window."_s));
     }
 
-    grantStorageAccessInternal(WTFMove(domainInNeedOfStorageAccess), WTFMove(openerDomain), std::nullopt, openerPageID, StorageAccessPromptWasShown::No, StorageAccessScope::PerPage, [](StorageAccessWasGranted) { });
+    grantStorageAccessInternal(WTFMove(domainInNeedOfStorageAccess), WTFMove(openerDomain), std::nullopt, openerPageID, StorageAccessPromptWasShown::No, StorageAccessScope::PerPage, canRequestStorageAccessWithoutUserInteraction, [](StorageAccessWasGranted) { });
 }
 
 void ResourceLoadStatisticsStore::grantStorageAccess(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, FrameIdentifier frameID, PageIdentifier pageID, StorageAccessPromptWasShown promptWasShown, StorageAccessScope scope, CompletionHandler<void(StorageAccessWasGranted)>&& completionHandler)
@@ -1769,24 +1765,62 @@ void ResourceLoadStatisticsStore::grantStorageAccess(SubFrameDomain&& subFrameDo
 
     auto transactionScope = beginTransactionIfNecessary();
 
-    if (promptWasShown == StorageAccessPromptWasShown::Yes) {
-        auto subFrameStatus = ensureResourceStatisticsForRegistrableDomain(subFrameDomain);
-        if (!subFrameStatus.second) {
-            ITP_RELEASE_LOG_ERROR(m_sessionID, "%p - ResourceLoadStatisticsStore::grantStorageAccess was not completed due to failed insert attempt", this);
-            return completionHandler(StorageAccessWasGranted::No);
-        }
-        ASSERT(subFrameStatus.first == AddedRecord::No);
+    auto addGrant = [&, frameID, pageID, promptWasShown, scope] (SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction, CompletionHandler<void(StorageAccessWasGranted)>&& completionHandler) mutable {
+        if (promptWasShown == StorageAccessPromptWasShown::Yes) {
+            auto subFrameStatus = ensureResourceStatisticsForRegistrableDomain(subFrameDomain);
+            if (!subFrameStatus.second) {
+                ITP_RELEASE_LOG_ERROR(m_sessionID, "%p - ResourceLoadStatisticsStore::grantStorageAccess was not completed due to failed insert attempt", this);
+                return completionHandler(StorageAccessWasGranted::No);
+            }
+            ASSERT(subFrameStatus.first == AddedRecord::No);
 #if ASSERT_ENABLED
-        if (!NetworkStorageSession::canRequestStorageAccessForLoginOrCompatibilityPurposesWithoutPriorUserInteraction(subFrameDomain, topFrameDomain))
-            ASSERT(hasHadUserInteraction(subFrameDomain, OperatingDatesWindow::Long));
+            if (canRequestStorageAccessWithoutUserInteraction == CanRequestStorageAccessWithoutUserInteraction::No)
+                ASSERT(hasHadUserInteraction(subFrameDomain, OperatingDatesWindow::Long));
 #endif
-        insertDomainRelationshipList(storageAccessUnderTopFrameDomainsQuery, HashSet<RegistrableDomain>({ topFrameDomain }), *subFrameStatus.second);
-    }
+            insertDomainRelationshipList(storageAccessUnderTopFrameDomainsQuery, HashSet<RegistrableDomain>({ topFrameDomain }), *subFrameStatus.second);
+        }
 
-    grantStorageAccessInternal(WTFMove(subFrameDomain), WTFMove(topFrameDomain), frameID, pageID, promptWasShown, scope, WTFMove(completionHandler));
+        grantStorageAccessInternal(WTFMove(subFrameDomain), WTFMove(topFrameDomain), frameID, pageID, promptWasShown, scope, canRequestStorageAccessWithoutUserInteraction, WTFMove(completionHandler));
+    };
+
+    RunLoop::main().dispatch([weakThis = WeakPtr { *this }, subFrameDomain = WTFMove(subFrameDomain).isolatedCopy(), topFrameDomain = WTFMove(topFrameDomain).isolatedCopy(), workQueue = m_workQueue, store = Ref { store() }, addGrant = WTFMove(addGrant), completionHandler = WTFMove(completionHandler)]() mutable {
+
+        std::optional<OrganizationStorageAccessPromptQuirk> additionalDomainGrants;
+        CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction { CanRequestStorageAccessWithoutUserInteraction::No };
+
+        if (auto* networkSession = store->networkSession()) {
+            if (auto* storageSession = networkSession->networkStorageSession()) {
+                additionalDomainGrants = storageSession->storageAccessQuirkForDomainPair(subFrameDomain, topFrameDomain);
+                canRequestStorageAccessWithoutUserInteraction = storageSession->canRequestStorageAccessForLoginOrCompatibilityPurposesWithoutPriorUserInteraction(subFrameDomain, topFrameDomain) ? CanRequestStorageAccessWithoutUserInteraction::Yes : CanRequestStorageAccessWithoutUserInteraction::No;
+            }
+        }
+        workQueue->dispatch([weakThis = WTFMove(weakThis), additionalDomainGrants = crossThreadCopy(WTFMove(additionalDomainGrants)), subFrameDomain = crossThreadCopy(WTFMove(subFrameDomain)), topFrameDomain = crossThreadCopy(WTFMove(topFrameDomain)), addGrant = WTFMove(addGrant), canRequestStorageAccessWithoutUserInteraction, completionHandler = WTFMove(completionHandler)] () mutable {
+            if (!weakThis) {
+                completionHandler(StorageAccessWasGranted::No);
+                return;
+            }
+            if (additionalDomainGrants) {
+                for (auto&& [quirkTopFrameDomain, subFrameDomains] : additionalDomainGrants->domainPairings) {
+                    for (auto&& quirkSubFrameDomain : subFrameDomains) {
+                        if (quirkTopFrameDomain == topFrameDomain && quirkSubFrameDomain == subFrameDomain)
+                            continue;
+                        StorageAccessWasGranted wasAccessGranted { StorageAccessWasGranted::No };
+                        addGrant(SubFrameDomain { quirkSubFrameDomain }, TopFrameDomain { quirkTopFrameDomain }, canRequestStorageAccessWithoutUserInteraction, [&wasAccessGranted] (StorageAccessWasGranted wasGranted) {
+                            wasAccessGranted = wasGranted;
+                        });
+                        if (wasAccessGranted == StorageAccessWasGranted::No) {
+                            completionHandler(wasAccessGranted);
+                            return;
+                        }
+                    }
+                }
+            }
+            addGrant(WTFMove(subFrameDomain), WTFMove(topFrameDomain), canRequestStorageAccessWithoutUserInteraction, WTFMove(completionHandler));
+        });
+    });
 }
 
-void ResourceLoadStatisticsStore::grantStorageAccessInternal(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, std::optional<FrameIdentifier> frameID, PageIdentifier pageID, StorageAccessPromptWasShown promptWasShownNowOrEarlier, StorageAccessScope scope, CompletionHandler<void(StorageAccessWasGranted)>&& completionHandler)
+void ResourceLoadStatisticsStore::grantStorageAccessInternal(SubFrameDomain&& subFrameDomain, TopFrameDomain&& topFrameDomain, std::optional<FrameIdentifier> frameID, PageIdentifier pageID, StorageAccessPromptWasShown promptWasShownNowOrEarlier, StorageAccessScope scope, CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction, CompletionHandler<void(StorageAccessWasGranted)>&& completionHandler)
 {
     ASSERT(!RunLoop::isMain());
 
@@ -1805,7 +1839,7 @@ void ResourceLoadStatisticsStore::grantStorageAccessInternal(SubFrameDomain&& su
         }
         ASSERT(subFrameStatus.first == AddedRecord::No);
 #if ASSERT_ENABLED
-        if (!NetworkStorageSession::canRequestStorageAccessForLoginOrCompatibilityPurposesWithoutPriorUserInteraction(subFrameDomain, topFrameDomain))
+        if (canRequestStorageAccessWithoutUserInteraction == CanRequestStorageAccessWithoutUserInteraction::No)
             ASSERT(hasHadUserInteraction(subFrameDomain, OperatingDatesWindow::Long));
 #endif
         ASSERT(hasUserGrantedStorageAccessThroughPrompt(*subFrameStatus.second, topFrameDomain) == StorageAccessPromptWasShown::Yes);
@@ -2548,7 +2582,7 @@ bool ResourceLoadStatisticsStore::areAllThirdPartyCookiesBlockedUnder(const TopF
     return false;
 }
 
-CookieAccess ResourceLoadStatisticsStore::cookieAccess(const SubResourceDomain& subresourceDomain, const TopFrameDomain& topFrameDomain)
+CookieAccess ResourceLoadStatisticsStore::cookieAccess(const SubResourceDomain& subresourceDomain, const TopFrameDomain& topFrameDomain, CanRequestStorageAccessWithoutUserInteraction canRequestStorageAccessWithoutUserInteraction)
 {
     ASSERT(!RunLoop::isMain());
 
@@ -2565,7 +2599,7 @@ CookieAccess ResourceLoadStatisticsStore::cookieAccess(const SubResourceDomain& 
     if (!areAllThirdPartyCookiesBlockedUnder(topFrameDomain) && !isPrevalent)
         return CookieAccess::BasedOnCookiePolicy;
 
-    if (!NetworkStorageSession::canRequestStorageAccessForLoginOrCompatibilityPurposesWithoutPriorUserInteraction(subresourceDomain, topFrameDomain) && !hadUserInteraction)
+    if (canRequestStorageAccessWithoutUserInteraction == CanRequestStorageAccessWithoutUserInteraction::No && !hadUserInteraction)
         return CookieAccess::CannotRequest;
 
     return CookieAccess::OnlyIfGranted;
@@ -3345,5 +3379,3 @@ void ResourceLoadStatisticsStore::insertExpiredStatisticForTesting(const Registr
 
 #undef ITP_RELEASE_LOG
 #undef ITP_RELEASE_LOG_ERROR
-
-#endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2012-2023 Apple Inc. All Rights Reserved.
+ * Copyright (C) 2012-2024 Apple Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -60,7 +60,6 @@ UnlinkedCodeBlock::UnlinkedCodeBlock(VM& vm, Structure* structure, CodeType code
     , m_derivedContextType(static_cast<unsigned>(info.derivedContextType()))
     , m_evalContextType(static_cast<unsigned>(info.evalContextType()))
     , m_codeType(static_cast<unsigned>(codeType))
-    , m_didOptimize(static_cast<unsigned>(TriState::Indeterminate))
     , m_age(0)
     , m_hasCheckpoints(false)
     , m_parseMode(info.parseMode())
@@ -69,7 +68,6 @@ UnlinkedCodeBlock::UnlinkedCodeBlock(VM& vm, Structure* structure, CodeType code
 {
     ASSERT(m_constructorKind == static_cast<unsigned>(info.constructorKind()));
     ASSERT(m_codeType == static_cast<unsigned>(codeType));
-    ASSERT(m_didOptimize == static_cast<unsigned>(TriState::Indeterminate));
     if (info.needsClassFieldInitializer() == NeedsClassFieldInitializer::Yes) {
         Locker locker { cellLock() };
         createRareDataIfNecessary(locker);
@@ -152,40 +150,36 @@ size_t UnlinkedCodeBlock::RareData::sizeInBytes(const AbstractLocker&) const
     return size;
 }
 
-int UnlinkedCodeBlock::lineNumberForBytecodeIndex(BytecodeIndex bytecodeIndex)
+LineColumn UnlinkedCodeBlock::lineColumnForBytecodeIndex(BytecodeIndex bytecodeIndex)
 {
     ASSERT(bytecodeIndex.offset() < instructions().size());
     unsigned divot { 0 };
     unsigned startOffset { 0 };
     unsigned endOffset { 0 };
-    unsigned line { 0 };
-    unsigned column { 0 };
-    expressionRangeForBytecodeIndex(bytecodeIndex, divot, startOffset, endOffset, line, column);
-    return line;
+    LineColumn lineColumn;
+    expressionRangeForBytecodeIndex(bytecodeIndex, divot, startOffset, endOffset, lineColumn);
+    return lineColumn;
 }
 
-inline void UnlinkedCodeBlock::getLineAndColumn(const ExpressionRangeInfo& info,
-    unsigned& line, unsigned& column) const
+inline LineColumn UnlinkedCodeBlock::getLineAndColumn(const ExpressionRangeInfo& info) const
 {
     switch (info.mode) {
     case ExpressionRangeInfo::FatLineMode:
-        info.decodeFatLineMode(line, column);
-        break;
+        return info.decodeFatLineMode();
     case ExpressionRangeInfo::FatColumnMode:
-        info.decodeFatColumnMode(line, column);
-        break;
+        return info.decodeFatColumnMode();
     case ExpressionRangeInfo::FatLineAndColumnMode: {
         unsigned fatIndex = info.position;
         ExpressionRangeInfo::FatPosition& fatPos = m_rareData->m_expressionInfoFatPositions[fatIndex];
-        line = fatPos.line;
-        column = fatPos.column;
-        break;
+        return fatPos.lineColumn;
     }
     } // switch
+    ASSERT_NOT_REACHED();
+    return { };
 }
 
 #ifndef NDEBUG
-static void dumpLineColumnEntry(size_t index, const JSInstructionStream& instructionStream, unsigned instructionOffset, unsigned line, unsigned column)
+static void dumpLineColumnEntry(size_t index, const JSInstructionStream& instructionStream, unsigned instructionOffset, LineColumn lineColumn)
 {
     const auto instruction = instructionStream.at(instructionOffset);
     const char* event = "";
@@ -200,7 +194,7 @@ static void dumpLineColumnEntry(size_t index, const JSInstructionStream& instruc
         case WillExecuteExpression: event = " WillExecuteExpression"; break;
         }
     }
-    dataLogF("  [%zu] pc %u @ line %u col %u : %s%s\n", index, instructionOffset, line, column, instruction->name(), event);
+    dataLogF("  [%zu] pc %u @ line %u col %u : %s%s\n", index, instructionOffset, lineColumn.line, lineColumn.column, instruction->name(), event);
 }
 
 void UnlinkedCodeBlock::dumpExpressionRangeInfo()
@@ -211,16 +205,13 @@ void UnlinkedCodeBlock::dumpExpressionRangeInfo()
     dataLogF("UnlinkedCodeBlock %p expressionRangeInfo[%zu] {\n", this, size);
     for (size_t i = 0; i < size; i++) {
         ExpressionRangeInfo& info = expressionInfo[i];
-        unsigned line;
-        unsigned column;
-        getLineAndColumn(info, line, column);
-        dumpLineColumnEntry(i, instructions(), info.instructionOffset, line, column);
+        dumpLineColumnEntry(i, instructions(), info.instructionOffset, getLineAndColumn(info));
     }
     dataLog("}\n");
 }
 #endif
 
-void UnlinkedCodeBlock::expressionRangeForBytecodeIndex(BytecodeIndex bytecodeIndex, unsigned& divot, unsigned& startOffset, unsigned& endOffset, unsigned& line, unsigned& column) const
+void UnlinkedCodeBlock::expressionRangeForBytecodeIndex(BytecodeIndex bytecodeIndex, unsigned& divot, unsigned& startOffset, unsigned& endOffset, LineColumn& lineColumn) const
 {
     ASSERT(bytecodeIndex.offset() < instructions().size());
 
@@ -228,8 +219,7 @@ void UnlinkedCodeBlock::expressionRangeForBytecodeIndex(BytecodeIndex bytecodeIn
         startOffset = 0;
         endOffset = 0;
         divot = 0;
-        line = 0;
-        column = 0;
+        lineColumn = { };
         return;
     }
 
@@ -252,7 +242,7 @@ void UnlinkedCodeBlock::expressionRangeForBytecodeIndex(BytecodeIndex bytecodeIn
     startOffset = info.startOffset;
     endOffset = info.endOffset;
     divot = info.divotPoint;
-    getLineAndColumn(info, line, column);
+    lineColumn = getLineAndColumn(info);
 }
 
 bool UnlinkedCodeBlock::typeProfilerExpressionInfoForBytecodeOffset(unsigned bytecodeOffset, unsigned& startDivot, unsigned& endDivot)

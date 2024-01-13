@@ -510,6 +510,7 @@ void CL_API_CALL cl{name}({params})
 
     ANGLE_CL_VALIDATE_VOID({name}{comma_if_needed}{internal_params});
 
+    cl::gClErrorTls = CL_SUCCESS;
     {name}({internal_params});
 }}
 """
@@ -523,6 +524,7 @@ cl_int CL_API_CALL cl{name}({params})
 
     ANGLE_CL_VALIDATE_ERROR({name}{comma_if_needed}{internal_params});
 
+    cl::gClErrorTls = CL_SUCCESS;
     return {name}({internal_params});
 }}
 """
@@ -536,13 +538,13 @@ TEMPLATE_CL_ENTRY_POINT_WITH_ERRCODE_RET = """\
 
     ANGLE_CL_VALIDATE_ERRCODE_RET({name}{comma_if_needed}{internal_params});
 
-    cl_int errorCode = CL_SUCCESS;
-    {return_type} object = {name}({internal_params}, errorCode);
+    cl::gClErrorTls      = CL_SUCCESS;
+    {return_type} object = {name}({internal_params});
 
-    ASSERT((errorCode == CL_SUCCESS) == (object != nullptr));
+    ASSERT((cl::gClErrorTls == CL_SUCCESS) == (object != nullptr));
     if (errcode_ret != nullptr)
     {{
-        *errcode_ret = errorCode;
+        *errcode_ret = cl::gClErrorTls;
     }}
     return object;
 }}
@@ -555,6 +557,7 @@ TEMPLATE_CL_ENTRY_POINT_WITH_RETURN_POINTER = """\
 
     {packed_gl_enum_conversions}
 
+    cl::gClErrorTls = CL_SUCCESS;
     ANGLE_CL_VALIDATE_POINTER({name}{comma_if_needed}{internal_params});
 
     return {name}({internal_params});
@@ -3031,7 +3034,10 @@ def get_context_lock(api, cmd_name):
 
 def get_prepare_swap_buffers_call(api, cmd_name, params):
     if cmd_name not in [
-            "eglSwapBuffers", "eglSwapBuffersWithDamageKHR", "eglSwapBuffersWithFrameTokenANGLE"
+            "eglSwapBuffers",
+            "eglSwapBuffersWithDamageKHR",
+            "eglSwapBuffersWithFrameTokenANGLE",
+            "eglQuerySurface",
     ]:
         return ""
 
@@ -3044,8 +3050,14 @@ def get_prepare_swap_buffers_call(api, cmd_name, params):
         if param_type == "EGLSurface":
             passed_params[1] = param
 
-    return "ANGLE_EGLBOOLEAN_TRY(EGL_PrepareSwapBuffersANGLE(%s));" % (", ".join(
+    prepareCall = "ANGLE_EGLBOOLEAN_TRY(EGL_PrepareSwapBuffersANGLE(%s));" % (", ".join(
         [just_the_name(param) for param in passed_params]))
+
+    # For eglQuerySurface, the prepare call is only needed for EGL_BUFFER_AGE
+    if cmd_name == "eglQuerySurface":
+        prepareCall = "if (attribute == EGL_BUFFER_AGE_EXT) {" + prepareCall + "}"
+
+    return prepareCall
 
 
 def get_preamble(api, cmd_name, params):
@@ -3074,13 +3086,17 @@ def get_unlocked_tail_call(api, cmd_name):
     # - glTexImage2D, glTexImage3D, glTexSubImage2D, glTexSubImage3D,
     #   glCompressedTexImage2D, glCompressedTexImage3D,
     #   glCompressedTexSubImage2D, glCompressedTexSubImage3D -> May perform the
-    #   data upload on the host in  tail call
+    #   data upload on the host in tail call
+    #
+    # - glCompileShader and glLinkProgram -> May perform the compilation / link
+    #   in tail call
     #
     if (cmd_name in [
             'eglDestroySurface', 'eglMakeCurrent', 'eglReleaseThread', 'eglCreateWindowSurface',
             'eglCreatePlatformWindowSurface', 'eglCreatePlatformWindowSurfaceEXT',
             'eglPrepareSwapBuffersANGLE', 'eglSwapBuffers', 'eglSwapBuffersWithDamageKHR',
-            'eglSwapBuffersWithFrameTokenANGLE', 'glFinishFenceNV'
+            'eglSwapBuffersWithFrameTokenANGLE', 'glFinishFenceNV', 'glCompileShader',
+            'glLinkProgram'
     ] or cmd_name.startswith('glTexImage2D') or cmd_name.startswith('glTexImage3D') or
             cmd_name.startswith('glTexSubImage2D') or cmd_name.startswith('glTexSubImage3D') or
             cmd_name.startswith('glCompressedTexImage2D') or
@@ -3118,7 +3134,8 @@ def write_stubs_header(api, annotation, title, data_source, out_file, all_comman
         params = [] if api == apis.CL else ["Thread *thread"]
         params += ["".join(param.itertext()) for param in command.findall('param')]
         if params and just_the_name(params[-1]) == "errcode_ret":
-            params[-1] = "cl_int &errorCode"
+            # Using TLS object for CL error handling, no longer a need for errcode_ret
+            del params[-1]
         return_type = proto_text[:-len(cmd_name)].strip()
 
         internal_params = get_internal_params(api, cmd_name, params, cmd_packed_egl_enums,

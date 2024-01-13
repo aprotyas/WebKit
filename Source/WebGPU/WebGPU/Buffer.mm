@@ -63,7 +63,7 @@ static bool validateCreateBuffer(const Device& device, const WGPUBufferDescripto
         return false;
 
     constexpr auto allUsages = (WGPUBufferUsage_MapRead | WGPUBufferUsage_MapWrite | WGPUBufferUsage_CopySrc | WGPUBufferUsage_CopyDst | WGPUBufferUsage_Index | WGPUBufferUsage_Vertex | WGPUBufferUsage_Uniform | WGPUBufferUsage_Storage | WGPUBufferUsage_Indirect | WGPUBufferUsage_QueryResolve);
-    if (!(usage & allUsages))
+    if (!(usage & allUsages) || usage > allUsages)
         return false;
 
     if ((usage & WGPUBufferUsage_MapRead) && (usage & ~WGPUBufferUsage_CopyDst & ~WGPUBufferUsage_MapRead))
@@ -114,8 +114,7 @@ Ref<Buffer> Device::createBuffer(const WGPUBufferDescriptor& descriptor)
     if (!validateCreateBuffer(*this, descriptor)) {
         generateAValidationError("Validation failure."_s);
 
-        if (!validateCreateBuffer(*this, descriptor))
-            return Buffer::createInvalid(*this);
+        return Buffer::createInvalid(*this);
     }
 
     // FIXME(PERFORMANCE): Consider write-combining CPU cache mode.
@@ -211,7 +210,7 @@ void* Buffer::getMappedRange(size_t offset, size_t size)
 {
     // https://gpuweb.github.io/gpuweb/#dom-gpubuffer-getmappedrange
     if (!isValid()) {
-        m_emptyBuffer.resize(size);
+        m_emptyBuffer.resize(std::max<size_t>(size, 1));
         return &m_emptyBuffer[0];
     }
 
@@ -230,35 +229,37 @@ void* Buffer::getMappedRange(size_t offset, size_t size)
     return static_cast<char*>(m_buffer.contents) + offset;
 }
 
-bool Buffer::validateMapAsync(WGPUMapModeFlags mode, size_t offset, size_t rangeSize) const
+NSString* Buffer::errorValidatingMapAsync(WGPUMapModeFlags mode, size_t offset, size_t rangeSize) const
 {
+#define ERROR_STRING(x) (@"GPUTexture.mapAsync: " x)
     if (!isValid())
-        return false;
+        return ERROR_STRING(@"Buffer is not valid");
 
     if (offset % 8)
-        return false;
+        return ERROR_STRING(@"Offset is not divisible by 8");
 
     if (rangeSize % 4)
-        return false;
+        return ERROR_STRING(@"range size is not divisible by 4");
 
     auto end = checkedSum<uint64_t>(offset, rangeSize);
     if (end.hasOverflowed() || end.value() > m_size)
-        return false;
+        return ERROR_STRING(@"offset and rangeSize overflowed");
 
-    if (m_state != State::Unmapped && m_state != State::MappedAtCreation)
-        return false;
+    if (m_state != State::Unmapped)
+        return ERROR_STRING(@"state != Unmapped");
 
     auto readWriteModeFlags = mode & (WGPUMapMode_Read | WGPUMapMode_Write);
     if (readWriteModeFlags != WGPUMapMode_Read && readWriteModeFlags != WGPUMapMode_Write)
-        return false;
+        return ERROR_STRING(@"readWriteModeFlags != Read && readWriteModeFlags != Write");
 
     if ((mode & WGPUMapMode_Read) && !(m_usage & WGPUBufferUsage_MapRead))
-        return false;
+        return ERROR_STRING(@"(mode & Read) && !(usage & Read)");
 
     if ((mode & WGPUMapMode_Write) && !(m_usage & WGPUBufferUsage_MapWrite))
-        return false;
+        return ERROR_STRING(@"(mode & Write) && !(usage & Write)");
 
-    return true;
+#undef ERROR_STRING
+    return nil;
 }
 
 void Buffer::mapAsync(WGPUMapModeFlags mode, size_t offset, size_t size, CompletionHandler<void(WGPUBufferMapAsyncStatus)>&& callback)
@@ -269,12 +270,10 @@ void Buffer::mapAsync(WGPUMapModeFlags mode, size_t offset, size_t size, Complet
     if (size == WGPU_WHOLE_MAP_SIZE)
         rangeSize = computeRangeSize(m_size, offset);
 
-    if (!validateMapAsync(mode, offset, rangeSize)) {
-        m_device->generateAValidationError("Validation failure."_s);
+    if (NSString* error = errorValidatingMapAsync(mode, offset, rangeSize)) {
+        m_device->generateAValidationError(error);
 
-        m_device->instance().scheduleWork([callback = WTFMove(callback)]() mutable {
-            callback(WGPUBufferMapAsyncStatus_ValidationError);
-        });
+        callback(WGPUBufferMapAsyncStatus_ValidationError);
         return;
     }
 
@@ -314,11 +313,6 @@ void Buffer::mapAsync(WGPUMapModeFlags mode, size_t offset, size_t size, Complet
 
 bool Buffer::validateUnmap() const
 {
-    if (m_state != State::MappedAtCreation
-        && m_state != State::MappingPending
-        && m_state != State::Mapped)
-        return false;
-
     return true;
 }
   
@@ -326,7 +320,7 @@ void Buffer::unmap()
 {
     // https://gpuweb.github.io/gpuweb/#dom-gpubuffer-unmap
 
-    if (!validateUnmap())
+    if (!validateUnmap() && !m_device->isValid())
         return;
 
     // FIXME: "If this.[[state]] is mapping pending: Reject [[mapping]] with an AbortError."
@@ -352,6 +346,11 @@ void Buffer::setLabel(String&& label)
 uint64_t Buffer::size() const
 {
     return m_emptyBuffer.size() ?: m_size;
+}
+
+bool Buffer::isDestroyed() const
+{
+    return state() == State::Destroyed;
 }
 
 } // namespace WebGPU

@@ -81,7 +81,6 @@ RenderView::RenderView(Document& document, RenderStyle&& style)
     , m_initialContainingBlock(makeUniqueRef<Layout::InitialContainingBlock>(RenderStyle::clone(this->style())))
     , m_layoutState(makeUniqueRef<Layout::LayoutState>(document, *m_initialContainingBlock))
     , m_selection(*this)
-    , m_lazyRepaintTimer(*this, &RenderView::lazyRepaintTimerFired)
 {
     // FIXME: We should find a way to enforce this at compile time.
     ASSERT(document.view());
@@ -121,35 +120,6 @@ void RenderView::styleDidChange(StyleDifference diff, const RenderStyle* oldStyl
 
     if (directionChanged)
         frameView().topContentDirectionDidChange();
-}
-
-void RenderView::scheduleLazyRepaint(RenderBox& renderer)
-{
-    if (renderer.renderBoxNeedsLazyRepaint())
-        return;
-    renderer.setRenderBoxNeedsLazyRepaint(true);
-    m_renderersNeedingLazyRepaint.add(renderer);
-    if (!m_lazyRepaintTimer.isActive())
-        m_lazyRepaintTimer.startOneShot(0_s);
-}
-
-void RenderView::unscheduleLazyRepaint(RenderBox& renderer)
-{
-    if (!renderer.renderBoxNeedsLazyRepaint())
-        return;
-    renderer.setRenderBoxNeedsLazyRepaint(false);
-    m_renderersNeedingLazyRepaint.remove(renderer);
-    if (m_renderersNeedingLazyRepaint.isEmptyIgnoringNullReferences())
-        m_lazyRepaintTimer.stop();
-}
-
-void RenderView::lazyRepaintTimerFired()
-{
-    for (auto& renderer : m_renderersNeedingLazyRepaint) {
-        renderer.repaint();
-        renderer.setRenderBoxNeedsLazyRepaint(false);
-    }
-    m_renderersNeedingLazyRepaint.clear();
 }
 
 RenderBox::LogicalExtentComputedValues RenderView::computeLogicalHeight(LayoutUnit logicalHeight, LayoutUnit) const
@@ -373,9 +343,8 @@ RenderElement* RenderView::rendererForRootBackground() const
     auto* firstChild = this->firstChild();
     if (!firstChild)
         return nullptr;
-    ASSERT(is<RenderElement>(*firstChild));
-    auto& documentRenderer = downcast<RenderElement>(*firstChild);
 
+    auto& documentRenderer = downcast<RenderElement>(*firstChild);
     if (documentRenderer.hasBackground())
         return &documentRenderer;
 
@@ -406,6 +375,11 @@ static inline bool rendererObscuresBackground(const RenderElement& rootElement)
 
     if (rootElement.isComposited())
         return false;
+
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (rootElement.hasClipPath() && rootElement.isRenderSVGRoot())
+        return false;
+#endif
 
     auto* rendererForBackground = rootElement.view().rendererForRootBackground();
     if (!rendererForBackground)
@@ -578,32 +552,30 @@ void RenderView::repaintViewAndCompositedLayers()
         compositor.repaintCompositedLayers();
 }
 
-std::optional<LayoutRect> RenderView::computeVisibleRectInContainer(const LayoutRect& rect, const RenderLayerModelObject* container, VisibleRectContext context) const
+auto RenderView::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
 {
     // If a container was specified, and was not nullptr or the RenderView,
     // then we should have found it by now.
     ASSERT_ARG(container, !container || container == this);
 
     if (printing())
-        return rect;
-    
-    LayoutRect adjustedRect = rect;
+        return rects;
+
+    auto adjustedRects = rects;
     if (style().isFlippedBlocksWritingMode()) {
         // We have to flip by hand since the view's logical height has not been determined.  We
         // can use the viewport width and height.
-        if (style().isHorizontalWritingMode())
-            adjustedRect.setY(viewHeight() - adjustedRect.maxY());
-        else
-            adjustedRect.setX(viewWidth() - adjustedRect.maxX());
+        adjustedRects.flipForWritingMode(LayoutSize(viewWidth(), viewHeight()), style().isHorizontalWritingMode());
     }
 
     if (context.hasPositionFixedDescendant)
-        adjustedRect.moveBy(frameView().scrollPositionRespectingCustomFixedPosition());
-    
+        adjustedRects.moveBy(frameView().scrollPositionRespectingCustomFixedPosition());
+
     // Apply our transform if we have one (because of full page zooming).
-    if (!container && layer() && layer()->transform())
-        adjustedRect = LayoutRect(layer()->transform()->mapRect(snapRectToDevicePixels(adjustedRect, document().deviceScaleFactor())));
-    return adjustedRect;
+    if (!container && hasLayer() && layer()->transform())
+        adjustedRects.transform(*layer()->transform(), document().deviceScaleFactor());
+
+    return adjustedRects;
 }
 
 bool RenderView::isScrollableOrRubberbandableBox() const
@@ -932,12 +904,12 @@ void RenderView::removeRendererWithPausedImageAnimations(RenderElement& renderer
 
 void RenderView::resumePausedImageAnimationsIfNeeded(const IntRect& visibleRect)
 {
-    Vector<std::pair<WeakPtr<RenderElement>, WeakPtr<CachedImage>>, 10> toRemove;
+    Vector<std::pair<SingleThreadWeakPtr<RenderElement>, WeakPtr<CachedImage>>, 10> toRemove;
     for (auto it : m_renderersWithPausedImageAnimation) {
         auto& renderer = it.key;
         for (auto& image : it.value) {
             if (renderer.repaintForPausedImageAnimationsIfNeeded(visibleRect, *image))
-                toRemove.append({ renderer, image });
+                toRemove.append({ WeakPtr { renderer }, image });
         }
     }
     for (auto& pair : toRemove)
@@ -1133,7 +1105,7 @@ void RenderView::addCounterNeedingUpdate(RenderCounter& renderer)
     m_countersNeedingUpdate.add(renderer);
 }
 
-WeakHashSet<RenderCounter> RenderView::takeCountersNeedingUpdate()
+SingleThreadWeakHashSet<RenderCounter> RenderView::takeCountersNeedingUpdate()
 {
     return std::exchange(m_countersNeedingUpdate, { });
 }

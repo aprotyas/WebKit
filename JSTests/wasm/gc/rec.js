@@ -39,6 +39,13 @@ function testRecDeclaration() {
     "WebAssembly.Module doesn't parse at byte 20: can't get array's element Type"
   );
 
+  // Test a zero-length recursion group.
+  assert.throws(
+    () => new WebAssembly.Instance(module("\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x8a\x80\x80\x80\x00\x01\x4e\x80\x80\x80\x80\0xC0")),
+    WebAssembly.CompileError,
+    "WebAssembly.Module doesn't parse at byte 14: parsing ended before the end of Type section (evaluating 'new WebAssembly.Module(buffer)"
+  );
+
   /*
    *  Test invalid index in a recursion group with more than one type.
    *
@@ -235,7 +242,7 @@ function testRecDeclaration() {
       )
     `),
     WebAssembly.CompileError,
-    "WebAssembly.Module doesn't validate: control flow returns with unexpected type. ((() -> [Ref], () -> [Ref]).1) is not a ((() -> [Ref], () -> [Ref]).0), in function at index 1 (evaluating 'new WebAssembly.Module(binary)')"
+    "WebAssembly.Module doesn't validate: control flow returns with unexpected type. (ref <func:1>) is not a (ref <func:0>), in function at index 1 (evaluating 'new WebAssembly.Module(binary)')"
   );
 
   instantiate(`

@@ -49,7 +49,7 @@ using namespace HTMLNames;
 WTF_MAKE_ISO_ALLOCATED_IMPL(RenderCounter);
 
 using CounterMap = HashMap<AtomString, Ref<CounterNode>>;
-using CounterMaps = WeakHashMap<RenderElement, std::unique_ptr<CounterMap>>;
+using CounterMaps = SingleThreadWeakHashMap<RenderElement, std::unique_ptr<CounterMap>>;
 
 static CounterNode* makeCounterNode(RenderElement&, const AtomString& identifier, bool alwaysCreateCounter);
 
@@ -61,7 +61,8 @@ static CounterMaps& counterMaps()
 
 static Element* ancestorStyleContainmentObject(const Element& element)
 {
-    Element* ancestor = is<PseudoElement>(element) ? downcast<PseudoElement>(element).hostElement() : element.parentElement();
+    auto* pseudoElement = dynamicDowncast<PseudoElement>(element);
+    Element* ancestor = pseudoElement ? pseudoElement->hostElement() : element.parentElement();
     while (ancestor) {
         if (auto* style = ancestor->existingComputedStyle()) {
             if (style->containsStyle())
@@ -118,8 +119,8 @@ static Element* previousSiblingOrParentElement(const Element& element)
             return previous;
     }
 
-    if (is<PseudoElement>(element)) {
-        auto* hostElement = downcast<PseudoElement>(element).hostElement();
+    if (auto* pseudoElement = dynamicDowncast<PseudoElement>(element)) {
+        auto* hostElement = pseudoElement->hostElement();
         ASSERT(hostElement);
         if (hostElement->renderer())
             return hostElement;
@@ -163,20 +164,18 @@ static RenderElement* nextInPreOrder(const RenderElement& renderer, const Elemen
 
 static CounterDirectives listItemCounterDirectives(RenderElement& renderer)
 {
-    if (is<RenderListItem>(renderer)) {
-        auto& item = downcast<RenderListItem>(renderer);
+    if (auto* item = dynamicDowncast<RenderListItem>(renderer)) {
         return {
             .resetValue = std::nullopt,
-            .incrementValue = item.isInReversedOrderedList() ? -1 : 1,
+            .incrementValue = item->isInReversedOrderedList() ? -1 : 1,
             .setValue = std::nullopt
         };
     }
     if (auto element = renderer.element()) {
-        if (is<HTMLOListElement>(*element)) {
-            auto& list = downcast<HTMLOListElement>(*element);
+        if (auto* list = dynamicDowncast<HTMLOListElement>(*element)) {
             return {
-                .resetValue = list.start(),
-                .incrementValue = list.isReversed() ? 1 : -1,
+                .resetValue = list->start(),
+                .incrementValue = list->isReversed() ? 1 : -1,
                 .setValue = std::nullopt
             };
         }
@@ -417,7 +416,7 @@ static CounterNode* makeCounterNode(RenderElement& renderer, const AtomString& i
         skipDescendants = currentRenderer->shouldApplyStyleContainment();
         if (!currentRenderer->hasCounterNodeMap())
             continue;
-        CheckedPtr currentCounter = maps.find(*currentRenderer)->value->get(identifier);
+        RefPtr currentCounter = maps.find(*currentRenderer)->value->get(identifier);
         if (!currentCounter)
             continue;
         skipDescendants = true;
@@ -464,7 +463,7 @@ String RenderCounter::originalText() const
     if (!m_counterNode)
         return emptyString();
 
-    CheckedPtr child = m_counterNode;
+    RefPtr child = m_counterNode.get();
     int value = child->actsAsReset() ? child->value() : child->countInParent();
 
     auto counterText = [](const ListStyleType& styleType, int value, CSSCounterStyle* counterStyle) {
@@ -586,6 +585,9 @@ void RenderCounter::rendererStyleChangedSlowCase(RenderElement& renderer, const 
                 RenderCounter::destroyCounterNodes(renderer);
         }
     } else {
+        if (renderer.hasCounterNodeMap())
+            RenderCounter::destroyCounterNodes(renderer);
+
         for (auto& key : newStyle.counterDirectives().map.keys()) {
             // We must create this node here, because the added node may be a node with no display such as
             // as those created by the increment or reset directives and the re-layout that will happen will
@@ -614,14 +616,15 @@ void showCounterRendererTree(const WebCore::RenderObject* renderer, const char* 
 
     auto identifier = AtomString::fromLatin1(counterName);
     for (auto* current = root; current; current = current->nextInPreOrder()) {
-        if (!is<WebCore::RenderElement>(*current))
+        auto* element = dynamicDowncast<WebCore::RenderElement>(*current);
+        if (!element)
             continue;
         fprintf(stderr, "%c", (current == renderer) ? '*' : ' ');
         for (auto* ancestor = current; ancestor && ancestor != root; ancestor = ancestor->parent())
             fprintf(stderr, "    ");
         fprintf(stderr, "%p N:%p P:%p PS:%p NS:%p C:%p\n",
             current, current->node(), current->parent(), current->previousSibling(),
-            current->nextSibling(), downcast<WebCore::RenderElement>(*current).hasCounterNodeMap() ?
+            current->nextSibling(), element->hasCounterNodeMap() ?
             counterName ? WebCore::counterMaps().find(*downcast<WebCore::RenderElement>(current))->value->get(identifier) : (WebCore::CounterNode*)1 : (WebCore::CounterNode*)0);
     }
     fflush(stderr);

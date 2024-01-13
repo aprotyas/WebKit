@@ -41,7 +41,6 @@
 #import "_WKWebExtensionInternal.h"
 #import "_WKWebExtensionMatchPatternInternal.h"
 #import "_WKWebExtensionTab.h"
-#import <WebCore/WebCoreObjCExtras.h>
 #import <wtf/URLParser.h>
 #import <wtf/cocoa/VectorCocoa.h>
 
@@ -59,6 +58,12 @@ NSNotificationName const _WKWebExtensionContextDeniedPermissionMatchPatternsWere
 
 _WKWebExtensionContextNotificationUserInfoKey const _WKWebExtensionContextNotificationUserInfoKeyPermissions = @"permissions";
 _WKWebExtensionContextNotificationUserInfoKey const _WKWebExtensionContextNotificationUserInfoKeyMatchPatterns = @"matchPatterns";
+
+#if USE(APPKIT)
+using CocoaMenuItem = NSMenuItem;
+#else
+using CocoaMenuItem = UIMenuElement;
+#endif
 
 @implementation _WKWebExtensionContext
 
@@ -85,8 +90,7 @@ _WKWebExtensionContextNotificationUserInfoKey const _WKWebExtensionContextNotifi
 
 - (void)dealloc
 {
-    if (WebCoreObjCScheduleDeallocateOnMainRunLoop(_WKWebExtensionContext.class, self))
-        return;
+    ASSERT(isMainRunLoop());
 
     _webExtensionContext->~WebExtensionContext();
 }
@@ -537,6 +541,31 @@ static inline WebKit::WebExtensionContext::PermissionState toImpl(_WKWebExtensio
     NSParameterAssert([command isKindOfClass:_WKWebExtensionCommand.class]);
 
     _webExtensionContext->performCommand(command._webExtensionCommand, WebKit::WebExtensionContext::UserTriggered::Yes);
+}
+
+#if USE(APPKIT)
+- (BOOL)performCommandForEvent:(NSEvent *)event
+{
+    NSParameterAssert([event isKindOfClass:NSEvent.class]);
+
+    return _webExtensionContext->performCommand(event);
+}
+
+- (_WKWebExtensionCommand *)commandForEvent:(NSEvent *)event
+{
+    NSParameterAssert([event isKindOfClass:NSEvent.class]);
+
+    if (RefPtr result = _webExtensionContext->command(event))
+        return result->wrapper();
+    return nil;
+}
+#endif // USE(APPKIT)
+
+- (NSArray<CocoaMenuItem *> *)menuItemsForTab:(id<_WKWebExtensionTab>)tab
+{
+    NSParameterAssert([tab conformsToProtocol:@protocol(_WKWebExtensionTab)]);
+
+    return _webExtensionContext->platformMenuItems(toImpl(tab, *_webExtensionContext));
 }
 
 - (void)userGesturePerformedInTab:(id<_WKWebExtensionTab>)tab
@@ -1036,6 +1065,23 @@ static inline OptionSet<WebKit::WebExtensionTab::ChangedProperties> toImpl(_WKWe
 
 - (void)performCommand:(_WKWebExtensionCommand *)command
 {
+}
+
+#if USE(APPKIT)
+- (BOOL)performCommandForEvent:(NSEvent *)event
+{
+    return NO;
+}
+
+- (_WKWebExtensionCommand *)commandForEvent:(NSEvent *)event
+{
+    return nil;
+}
+#endif // USE(APPKIT)
+
+- (NSArray<CocoaMenuItem *> *)menuItemsForTab:(id<_WKWebExtensionTab>)tab
+{
+    return nil;
 }
 
 - (void)userGesturePerformedInTab:(id<_WKWebExtensionTab>)tab

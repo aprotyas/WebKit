@@ -79,6 +79,8 @@ public:
     void gatherDecoderImplementationName(Function<void(String&&)>&&);
     bool isNegotiationNeeded(uint32_t eventId) const { return eventId == m_negotiationNeededEventId; }
 
+    std::optional<bool> canTrickleIceCandidates() const;
+
     void configureAndLinkSource(RealtimeOutgoingMediaSourceGStreamer&, bool shouldLookForUnusedPads = false);
 
     bool addTrack(GStreamerRtpSenderBackend&, MediaStreamTrack&, const FixedVector<String>&);
@@ -139,8 +141,10 @@ private:
 
     MediaStream& mediaStreamFromRTCStream(String mediaStreamId);
 
-    void addRemoteStream(GstPad*);
+    String addRemoteStream(GstPad*);
     void removeRemoteStream(GstPad*);
+
+    void startRemoteStream(GstPad*, const String&);
 
     int pickAvailablePayloadType();
 

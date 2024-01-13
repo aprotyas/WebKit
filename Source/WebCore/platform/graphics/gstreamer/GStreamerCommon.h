@@ -74,6 +74,8 @@ void setGStreamerOptionsFromUIProcess(Vector<String>&&);
 bool ensureGStreamerInitialized();
 void registerWebKitGStreamerElements();
 void registerWebKitGStreamerVideoEncoder();
+void deinitializeGStreamer();
+
 unsigned getGstPlayFlag(const char* nick);
 uint64_t toGstUnsigned64Time(const MediaTime&);
 
@@ -389,10 +391,16 @@ void fillVideoInfoColorimetryFromColorSpace(GstVideoInfo*, const PlatformVideoCo
 void configureAudioDecoderForHarnessing(const GRefPtr<GstElement>&);
 void configureVideoDecoderForHarnessing(const GRefPtr<GstElement>&);
 
+void configureMediaStreamVideoDecoder(GstElement*);
+void configureVideoRTPDepayloader(GstElement*);
+
 bool gstObjectHasProperty(GstElement*, const char* name);
 bool gstObjectHasProperty(GstPad*, const char* name);
 
 GRefPtr<GstBuffer> wrapSpanData(const std::span<const uint8_t>&);
+
+void registerActivePipeline(const GRefPtr<GstElement>&);
+void unregisterPipeline(const GRefPtr<GstElement>&);
 
 } // namespace WebCore
 

@@ -63,7 +63,7 @@ const AtomString& AudioTrack::translationKeyword()
 }
 
 AudioTrack::AudioTrack(ScriptExecutionContext* context, AudioTrackPrivate& trackPrivate)
-    : MediaTrackBase(context, MediaTrackBase::AudioTrack, trackPrivate.id(), trackPrivate.label(), trackPrivate.language())
+    : MediaTrackBase(context, MediaTrackBase::AudioTrack, trackPrivate.trackUID(), trackPrivate.id(), trackPrivate.label(), trackPrivate.language())
     , m_private(trackPrivate)
     , m_enabled(trackPrivate.enabled())
     , m_configuration(AudioTrackConfiguration::create())
@@ -160,7 +160,7 @@ void AudioTrack::configurationChanged(const PlatformAudioTrackConfiguration& con
     m_configuration->setState(configuration);
 }
 
-void AudioTrack::idChanged(const AtomString& id)
+void AudioTrack::idChanged(TrackID id)
 {
     setId(id);
     m_clients.forEach([this] (auto& client) {
@@ -191,25 +191,25 @@ void AudioTrack::willRemove()
 void AudioTrack::updateKindFromPrivate()
 {
     switch (m_private->kind()) {
-    case AudioTrackPrivate::Alternative:
+    case AudioTrackPrivate::Kind::Alternative:
         setKind(alternativeAtom());
         break;
-    case AudioTrackPrivate::Description:
+    case AudioTrackPrivate::Kind::Description:
         setKind(AudioTrack::descriptionKeyword());
         break;
-    case AudioTrackPrivate::Main:
+    case AudioTrackPrivate::Kind::Main:
         setKind(mainAtom());
         break;
-    case AudioTrackPrivate::MainDesc:
+    case AudioTrackPrivate::Kind::MainDesc:
         setKind(AudioTrack::mainDescKeyword());
         break;
-    case AudioTrackPrivate::Translation:
+    case AudioTrackPrivate::Kind::Translation:
         setKind(AudioTrack::translationKeyword());
         break;
-    case AudioTrackPrivate::Commentary:
+    case AudioTrackPrivate::Kind::Commentary:
         setKind(commentaryAtom());
         break;
-    case AudioTrackPrivate::None:
+    case AudioTrackPrivate::Kind::None:
         setKind(emptyAtom());
         break;
     default:

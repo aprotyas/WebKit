@@ -32,6 +32,8 @@
 
 #include "CSSFontSelector.h"
 #include "DOMTokenList.h"
+#include "ElementAncestorIterator.h"
+#include "ElementAncestorIteratorInlines.h"
 #include "ElementInlines.h"
 #include "EventNames.h"
 #include "HTMLBodyElement.h"
@@ -54,6 +56,8 @@
 #include "RenderStyleSetters.h"
 #include "RenderTheme.h"
 #include "RenderView.h"
+#include "RubyElement.h"
+#include "RubyTextElement.h"
 #include "SVGElement.h"
 #include "SVGGraphicsElement.h"
 #include "SVGNames.h"
@@ -65,6 +69,8 @@
 #include "StyleUpdate.h"
 #include "Text.h"
 #include "TouchAction.h"
+#include "TypedElementDescendantIterator.h"
+#include "TypedElementDescendantIteratorInlines.h"
 #include "WebAnimationTypes.h"
 #include <wtf/RobinHoodHashSet.h>
 
@@ -213,11 +219,6 @@ static DisplayType equivalentInlineDisplay(const RenderStyle& style)
     return DisplayType::Inline;
 }
 
-static bool isOutermostSVGElement(const Element* element)
-{
-    return element && element->isSVGElement() && downcast<SVGElement>(*element).isOutermostSVGSVGElement();
-}
-
 static bool shouldInheritTextDecorationsInEffect(const RenderStyle& style, const Element* element)
 {
     if (style.isFloating() || style.hasOutOfFlowPosition())
@@ -237,7 +238,7 @@ static bool shouldInheritTextDecorationsInEffect(const RenderStyle& style, const
     }();
 
     // Outermost <svg> roots are considered to be atomic inline-level.
-    if (isOutermostSVGElement(element))
+    if (RefPtr svgElement = dynamicDowncast<SVGElement>(element); svgElement && svgElement->isOutermostSVGSVGElement())
         return false;
 
     // There is no other good way to prevent decorations from affecting user agent shadow trees.
@@ -336,10 +337,11 @@ OptionSet<EventListenerRegionType> Adjuster::computeEventListenerRegionTypes(con
 #endif
 
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
-    if (document.page() && document.page()->shouldBuildInteractionRegions() && eventTarget.isNode()) {
-        const auto& node = downcast<Node>(eventTarget);
-        if (node.willRespondToMouseClickEventsWithEditability(node.computeEditabilityForMouseClickEvents(&style)))
-            types.add(EventListenerRegionType::MouseClick);
+    if (document.page() && document.page()->shouldBuildInteractionRegions()) {
+        if (const auto* node = dynamicDowncast<Node>(eventTarget)) {
+            if (node->willRespondToMouseClickEventsWithEditability(node->computeEditabilityForMouseClickEvents(&style)))
+                types.add(EventListenerRegionType::MouseClick);
+        }
     }
 #else
     UNUSED_PARAM(document);
@@ -369,23 +371,65 @@ static bool shouldInlinifyForRuby(const RenderStyle& style, const RenderStyle& p
     return hasRubyParent && !style.hasOutOfFlowPosition() && !style.isFloating();
 }
 
+static bool isRubyContainerOrInternalRubyBox(const RenderStyle& style)
+{
+    auto display = style.display();
+    return display == DisplayType::Ruby
+        || display == DisplayType::RubyAnnotation
+        || display == DisplayType::RubyBase;
+}
+
+static bool hasUnsupportedRubyDisplay(DisplayType display, const Element* element)
+{
+    // Only allow ruby elements to have ruby display types for now.
+    switch (display) {
+    case DisplayType::Ruby:
+    case DisplayType::RubyBlock:
+        return !element || !element->hasTagName(rubyTag);
+    case DisplayType::RubyAnnotation:
+        return !element || !element->hasTagName(rtTag);
+    case DisplayType::RubyBase:
+        ASSERT_NOT_REACHED();
+        return false;
+    default:
+        return false;
+    }
+}
+
+// https://drafts.csswg.org/css-ruby-1/#bidi
+static UnicodeBidi forceBidiIsolationForRuby(UnicodeBidi unicodeBidi)
+{
+    switch (unicodeBidi) {
+    case UnicodeBidi::Normal:
+    case UnicodeBidi::Embed:
+    case UnicodeBidi::Isolate:
+        return UnicodeBidi::Isolate;
+    case UnicodeBidi::Override:
+    case UnicodeBidi::IsolateOverride:
+        return UnicodeBidi::IsolateOverride;
+    case UnicodeBidi::Plaintext:
+        return UnicodeBidi::Plaintext;
+    }
+    ASSERT_NOT_REACHED();
+    return UnicodeBidi::Isolate;
+}
+
 void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearanceStyle) const
 {
     if (style.display() == DisplayType::Contents)
         adjustDisplayContentsStyle(style);
+
+    if (m_element && (m_element->hasTagName(frameTag) || m_element->hasTagName(framesetTag))) {
+        // Framesets ignore display and position properties.
+        style.setPosition(PositionType::Static);
+        style.setEffectiveDisplay(DisplayType::Block);
+    }
 
     if (style.display() != DisplayType::None && style.display() != DisplayType::Contents) {
         if (m_element) {
             // Tables never support the -webkit-* values for text-align and will reset back to the default.
             if (is<HTMLTableElement>(*m_element) && (style.textAlign() == TextAlignMode::WebKitLeft || style.textAlign() == TextAlignMode::WebKitCenter || style.textAlign() == TextAlignMode::WebKitRight))
                 style.setTextAlign(TextAlignMode::Start);
-
-            // Frames and framesets never honor position:relative or position:absolute. This is necessary to
-            // fix a crash where a site tries to position these objects. They also never honor display.
-            if (m_element->hasTagName(frameTag) || m_element->hasTagName(framesetTag)) {
-                style.setPosition(PositionType::Static);
-                style.setEffectiveDisplay(DisplayType::Block);
-            }
 
             // Ruby text does not support float or position. This might change with evolution of the specification.
             if (m_element->hasTagName(rtTag)) {
@@ -396,6 +440,9 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
             if (m_element->hasTagName(legendTag))
                 style.setEffectiveDisplay(equivalentBlockDisplay(style));
         }
+
+        if (hasUnsupportedRubyDisplay(style.display(), m_element))
+            style.setEffectiveDisplay(style.display() == DisplayType::RubyBlock ? DisplayType::Block : DisplayType::Inline);
 
         // Top layer elements are always position: absolute; unless the position is set to fixed.
         // https://fullscreen.spec.whatwg.org/#new-stacking-layer
@@ -426,11 +473,15 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
             || style.display() == DisplayType::TableCell)
             style.setWritingMode(m_parentStyle.writingMode());
 
-        // FIXME: Since we don't support block-flow on flexible boxes yet, disallow setting
-        // of block-flow to anything other than WritingMode::HorizontalTb.
-        // https://bugs.webkit.org/show_bug.cgi?id=46418 - Flexible box support.
-        if (style.writingMode() != WritingMode::HorizontalTb && (style.display() == DisplayType::Box || style.display() == DisplayType::InlineBox))
+        if (style.isDisplayDeprecatedFlexibleBox()) {
+            // FIXME: Since we don't support block-flow on flexible boxes yet, disallow setting
+            // of block-flow to anything other than WritingMode::HorizontalTb.
+            // https://bugs.webkit.org/show_bug.cgi?id=46418 - Flexible box support.
             style.setWritingMode(WritingMode::HorizontalTb);
+        }
+
+        if (m_parentBoxStyle.isDisplayDeprecatedFlexibleBox())
+            style.setFloating(Float::None);
 
         // https://www.w3.org/TR/css-display/#transformations
         // "A parent with a grid or flex display value blockifies the box’s display type."
@@ -442,6 +493,9 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
         // https://www.w3.org/TR/css-ruby-1/#anon-gen-inlinize
         if (shouldInlinifyForRuby(style, m_parentBoxStyle))
             style.setEffectiveDisplay(equivalentInlineDisplay(style));
+        // https://drafts.csswg.org/css-ruby-1/#bidi
+        if (isRubyContainerOrInternalRubyBox(style))
+            style.setUnicodeBidi(forceBidiIsolationForRuby(style.unicodeBidi()));
     }
 
     auto hasAutoZIndex = [](const RenderStyle& style, const RenderStyle& parentBoxStyle, const Element* element) {
@@ -453,7 +507,7 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
         // of the value of the position property, with one exception: as for boxes in CSS 2.1, outer ‘svg’ elements
         // must be positioned for z-index to apply to them.
         if (element && element->document().settings().layerBasedSVGEngineEnabled()) {
-            if (auto* svgElement = dynamicDowncast<SVGElement>(element); svgElement && svgElement->isOutermostSVGSVGElement())
+            if (RefPtr svgElement = dynamicDowncast<SVGElement>(*element); svgElement && svgElement->isOutermostSVGSVGElement())
                 return element->renderer() && element->renderer()->style().position() == PositionType::Static;
 
             return false;
@@ -523,11 +577,11 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
             style.setOverflowY(style.overflowY() == Overflow::Visible ? Overflow::Auto : style.overflowY());
         }
 
-        if (is<HTMLInputElement>(*m_element) && downcast<HTMLInputElement>(*m_element).isPasswordField())
+        if (RefPtr input = dynamicDowncast<HTMLInputElement>(*m_element); input && input->isPasswordField())
             style.setTextSecurity(style.inputSecurity() == InputSecurity::Auto ? TextSecurity::Disc : TextSecurity::None);
 
         // Disallow -webkit-user-modify on :pseudo and ::pseudo elements.
-        if (!m_element->shadowPseudoId().isNull())
+        if (m_element->isInUserAgentShadowTree() && !m_element->userAgentPart().isNull())
             style.setUserModify(UserModify::ReadOnly);
 
         if (is<HTMLMarqueeElement>(*m_element)) {
@@ -610,6 +664,10 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
     style.adjustAnimations();
     style.adjustTransitions();
 
+    // Do the same for scroll-timeline and view-timeline longhands.
+    style.adjustScrollTimelines();
+    style.adjustViewTimelines();
+
 #if PLATFORM(COCOA)
     if (!linkedOnOrAfterSDKWithBehavior(SDKAlignedBehavior::DoesNotAddIntrinsicMarginsToFormControls)) {
         // Important: Intrinsic margins get added to controls before the theme has adjusted the style, since the theme will
@@ -617,7 +675,7 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
         if (is<HTMLFormControlElement>(m_element) && style.computedFontSize() >= 11) {
             // Don't apply intrinsic margins to image buttons. The designer knows how big the images are,
             // so we have to treat all image buttons as though they were explicitly sized.
-            if (!is<HTMLInputElement>(*m_element) || !downcast<HTMLInputElement>(*m_element).isImageButton())
+            if (RefPtr input = dynamicDowncast<HTMLInputElement>(*m_element); !input || !input->isImageButton())
                 addIntrinsicMargins(style);
         }
     }
@@ -645,8 +703,8 @@ void Adjuster::adjust(RenderStyle& style, const RenderStyle* userAgentAppearance
         style.setTransformStyleForcedToFlat(forceToFlat);
     }
 
-    if (is<SVGElement>(m_element))
-        adjustSVGElementStyle(style, downcast<SVGElement>(*m_element));
+    if (RefPtr element = dynamicDowncast<SVGElement>(m_element))
+        adjustSVGElementStyle(style, *element);
 
     // If the inherited value of justify-items includes the 'legacy' keyword (plus 'left', 'right' or
     // 'center'), 'legacy' computes to the the inherited value. Otherwise, 'auto' computes to 'normal'.
@@ -890,13 +948,12 @@ void Adjuster::adjustForSiteSpecificQuirks(RenderStyle& style) const
     }
 #if ENABLE(VIDEO)
     if (m_document.quirks().needsFullscreenDisplayNoneQuirk()) {
-        if (is<HTMLDivElement>(m_element) && style.display() == DisplayType::None) {
+        if (RefPtr div = dynamicDowncast<HTMLDivElement>(m_element); div && style.display() == DisplayType::None) {
             static MainThreadNeverDestroyed<const AtomString> instreamNativeVideoDivClass("instream-native-video--mobile"_s);
             static MainThreadNeverDestroyed<const AtomString> videoElementID("vjs_video_3_html5_api"_s);
 
-            auto& div = downcast<HTMLDivElement>(*m_element);
-            if (div.hasClass() && div.classNames().contains(instreamNativeVideoDivClass)) {
-                RefPtr video = dynamicDowncast<HTMLVideoElement>(div.treeScope().getElementById(videoElementID));
+            if (div->hasClass() && div->classNames().contains(instreamNativeVideoDivClass)) {
+                RefPtr video = dynamicDowncast<HTMLVideoElement>(div->treeScope().getElementById(videoElementID));
                 if (video && video->isFullscreen())
                     style.setEffectiveDisplay(DisplayType::Block);
             }

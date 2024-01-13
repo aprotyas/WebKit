@@ -220,11 +220,7 @@ WKArrayRef WKBundlePageCopyContextMenuAtPointInWindow(WKBundlePageRef pageRef, W
     if (!page)
         return nullptr;
 
-    auto* localMainFrame = dynamicDowncast<WebCore::LocalFrame>(page->mainFrame());
-    if (!localMainFrame)
-        return nullptr;
-
-    WebKit::WebContextMenu* contextMenu = WebKit::toImpl(pageRef)->contextMenuAtPointInWindow(localMainFrame->frameID(), WebKit::toIntPoint(point));
+    WebKit::WebContextMenu* contextMenu = WebKit::toImpl(pageRef)->contextMenuAtPointInWindow(page->mainFrame().frameID(), WebKit::toIntPoint(point));
     if (!contextMenu)
         return nullptr;
 
@@ -578,9 +574,19 @@ void WKBundlePageListenForLayoutMilestones(WKBundlePageRef pageRef, WKLayoutMile
     WebKit::toImpl(pageRef)->listenForLayoutMilestones(WebKit::toLayoutMilestones(milestones));
 }
 
-WKBundleInspectorRef WKBundlePageGetInspector(WKBundlePageRef pageRef)
+void WKBundlePageShowInspectorForTest(WKBundlePageRef page)
 {
-    return WebKit::toAPI(WebKit::toImpl(pageRef)->inspector());
+    WebKit::toImpl(page)->inspector()->show();
+}
+
+void WKBundlePageCloseInspectorForTest(WKBundlePageRef page)
+{
+    WebKit::toImpl(page)->inspector()->close();
+}
+
+void WKBundlePageEvaluateScriptInInspectorForTest(WKBundlePageRef page, WKStringRef script)
+{
+    WebKit::toImpl(page)->inspector()->evaluateScriptForTest(WebKit::toWTFString(script));
 }
 
 void WKBundlePageForceRepaint(WKBundlePageRef page)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2017-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -169,7 +169,7 @@ public:
 
     void applyConstraints(WebCore::MediaConstraints&& constraints, CompletionHandler<void(std::optional<RealtimeMediaSource::ApplyConstraintsError>&&)> callback)
     {
-        queueAndProcessSerialAction([this, weakThis = WeakPtr { this }, constraints = WTFMove(constraints), callback = WTFMove(callback)]() mutable -> Ref<GenericPromise> {
+        queueAndProcessSerialAction([this, weakThis = WeakPtr { this }, constraints = WTFMove(constraints), callback = WTFMove(callback)]() mutable {
 
             if (!weakThis) {
                 callback(RealtimeMediaSource::ApplyConstraintsError { { }, { } });
@@ -183,18 +183,20 @@ public:
 
             m_source->removeVideoFrameObserver(*this);
 
-            m_source->applyConstraints(WTFMove(constraints), [this, weakThis = WTFMove(weakThis), &constraints, callback = WTFMove(callback)](auto&& result) mutable {
+            m_source->applyConstraints(WTFMove(constraints), [this, weakThis = WTFMove(weakThis), &constraints, callback = WTFMove(callback)](auto&& error) mutable {
                 if (!weakThis) {
                     callback(RealtimeMediaSource::ApplyConstraintsError { { }, { } });
                     return;
                 }
 
-                if (!result && updateVideoConstraints(constraints))
+                if (!error) {
+                    updateVideoConstraints(constraints);
                     m_settings = { };
+                }
 
                 m_source->addVideoFrameObserver(*this, { m_widthConstraint, m_heightConstraint }, m_frameRateConstraint);
 
-                callback(WTFMove(result));
+                callback(WTFMove(error));
             });
 
             return GenericPromise::createAndResolve();
@@ -246,25 +248,20 @@ public:
                 return GenericPromise::createAndResolve();
             }
 
-            GenericPromise::Producer serialActionProducer;
-            Ref<GenericPromise> serialActionPromise = serialActionProducer;
-
-            m_source->takePhoto(WTFMove(photoSettings))->whenSettled(RunLoop::main(), [takePhotoProducer = WTFMove(takePhotoProducer), serialActionProducer = WTFMove(serialActionProducer)] (auto&& result) mutable {
+            return m_source->takePhoto(WTFMove(photoSettings))->whenSettled(RunLoop::main(), [takePhotoProducer = WTFMove(takePhotoProducer)] (auto&& result) mutable {
                 ASSERT(isMainRunLoop());
 
                 takePhotoProducer.settle(WTFMove(result));
-                serialActionProducer.resolve();
+                return GenericPromise::createAndResolve();
             });
-
-            return serialActionPromise;
         });
 
         return takePhotoPromise;
     }
 
-    void getPhotoCapabilities(GetPhotoCapabilitiesCallback&& handler)
+    Ref<RealtimeMediaSource::PhotoCapabilitiesNativePromise> getPhotoCapabilities()
     {
-        m_source->getPhotoCapabilities(WTFMove(handler));
+        return m_source->getPhotoCapabilities();
     }
 
     Ref<RealtimeMediaSource::PhotoSettingsNativePromise> getPhotoSettings()
@@ -529,12 +526,20 @@ void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstrai
     auto proxy = makeUnique<SourceProxy>(id, WTFMove(connection), ProcessIdentity { m_connectionProxy->resourceOwner() }, WTFMove(source), WTFMove(remoteVideoFrameObjectHeap));
     proxy->observeMedia();
 
-    auto completeSetup = [this](std::unique_ptr<SourceProxy>&& proxy, RealtimeMediaSourceIdentifier id, CreateSourceCallback&& completionHandler) mutable {
-        auto settings = proxy->settings();
-        auto capabilities = proxy->source().capabilities();
-        m_proxies.add(id, WTFMove(proxy));
+    auto completeSetup = [weakThis = WeakPtr { *this }, this](std::unique_ptr<SourceProxy>&& proxy, RealtimeMediaSourceIdentifier id, CreateSourceCallback&& completionHandler) mutable {
+        if (!weakThis) {
+            completionHandler({ "Capture proxy disappeared"_s, WebCore::MediaAccessDenialReason::OtherFailure }, { }, { });
+            return;
+        }
 
-        completionHandler({ }, WTFMove(settings), WTFMove(capabilities));
+        proxy->source().whenReady([completionHandler = WTFMove(completionHandler), proxy = WeakPtr { *proxy }] (auto&& error) mutable {
+            if (!!error || !proxy) {
+                completionHandler(error, { }, { });
+                return;
+            }
+            completionHandler({ }, proxy->settings(), proxy->source().capabilities());
+        });
+        m_proxies.add(id, WTFMove(proxy));
     };
 
     if (!constraints || proxy->source().type() != RealtimeMediaSource::Type::Video) {
@@ -552,7 +557,7 @@ void UserMediaCaptureManagerProxy::createMediaSourceForCaptureDeviceWithConstrai
     });
 }
 
-void UserMediaCaptureManagerProxy::startProducingData(RealtimeMediaSourceIdentifier id)
+void UserMediaCaptureManagerProxy::startProducingData(RealtimeMediaSourceIdentifier id, WebCore::PageIdentifier pageIdentifier)
 {
     auto* proxy = m_proxies.get(id);
     if (!proxy)
@@ -565,6 +570,9 @@ void UserMediaCaptureManagerProxy::startProducingData(RealtimeMediaSourceIdentif
 
 #if ENABLE(APP_PRIVACY_REPORT)
     m_connectionProxy->setTCCIdentity();
+#endif
+#if ENABLE(EXTENSION_CAPABILITIES)
+    m_connectionProxy->setCurrentMediaEnvironment(pageIdentifier);
 #endif
     m_connectionProxy->startProducingData(proxy->source().deviceType());
     proxy->start();
@@ -637,21 +645,20 @@ void UserMediaCaptureManagerProxy::takePhoto(RealtimeMediaSourceIdentifier sourc
         return;
     }
 
-    proxy->takePhoto(WTFMove(settings))->whenSettled(RunLoop::main(), [handler = WTFMove(handler)] (auto&& result) mutable {
-        handler(WTFMove(result));
-    });
+    proxy->takePhoto(WTFMove(settings))->whenSettled(RunLoop::main(), WTFMove(handler));
 }
 
 
 
 void UserMediaCaptureManagerProxy::getPhotoCapabilities(RealtimeMediaSourceIdentifier sourceID, GetPhotoCapabilitiesCallback&& handler)
 {
-    if (auto* proxy = m_proxies.get(sourceID)) {
-        proxy->getPhotoCapabilities(WTFMove(handler));
+    auto* proxy = m_proxies.get(sourceID);
+    if (!proxy) {
+        handler(Unexpected<String>("Device not available"_s));
         return;
     }
 
-    handler(PhotoCapabilitiesOrError("Device not available"_s));
+    proxy->getPhotoCapabilities()->whenSettled(RunLoop::main(), WTFMove(handler));
 }
 
 void UserMediaCaptureManagerProxy::getPhotoSettings(RealtimeMediaSourceIdentifier sourceID, GetPhotoSettingsCallback&& handler)

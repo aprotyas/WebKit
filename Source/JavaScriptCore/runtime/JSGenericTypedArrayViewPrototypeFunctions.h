@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015-2022 Apple Inc. All rights reserved.
+ * Copyright (C) 2015-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -765,9 +765,17 @@ static ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSortImpl(VM& v
 {
     auto scope = DECLARE_THROW_SCOPE(vm);
 
+    // https://tc39.es/ecma262/#sec-%typedarray%.prototype.sort
     if (comparatorValue.isUndefined()) {
-        if (UNLIKELY(!thisObject->sort()))
-            return throwVMTypeError(globalObject, scope, typedArrayBufferHasBeenDetachedErrorMessage);
+        auto sortResult = thisObject->sort();
+        if (UNLIKELY(sortResult != ViewClass::SortResult::Success)) {
+            if (sortResult == ViewClass::SortResult::Failed)
+                return throwVMTypeError(globalObject, scope, typedArrayBufferHasBeenDetachedErrorMessage);
+
+            ASSERT(sortResult == ViewClass::SortResult::OutOfMemory);
+            throwOutOfMemoryError(globalObject, scope);
+            return { };
+        }
         return JSValue::encode(thisObject);
     }
 
@@ -781,8 +789,11 @@ static ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSortImpl(VM& v
 
     Vector<typename ViewClass::ElementType, 16> src;
     Vector<typename ViewClass::ElementType, 16> dst;
-    src.resize(length);
-    dst.resize(length);
+    if (UNLIKELY(!src.tryGrow(length) || !dst.tryGrow(length))) {
+        throwOutOfMemoryError(globalObject, scope);
+        return { };
+    }
+
     WTF::copyElements(src.data(), originalArray, length);
 
     typename ViewClass::ElementType* result = nullptr;
@@ -852,7 +863,7 @@ static ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSortImpl(VM& v
     }
 
     if (UNLIKELY(thisObject->isDetached()))
-        return throwVMTypeError(globalObject, scope, typedArrayBufferHasBeenDetachedErrorMessage);
+        return JSValue::encode(thisObject);
 
     size_t copyLength = std::min<size_t>(thisObject->length(), length);
     WTF::copyElements(originalArray, result, copyLength);
@@ -869,7 +880,7 @@ ALWAYS_INLINE EncodedJSValue genericTypedArrayViewProtoFuncSort(VM& vm, JSGlobal
     if (!comparatorValue.isUndefined() && !comparatorValue.isCallable())
         return throwVMTypeError(globalObject, scope, "TypedArray.prototype.sort requires the comparator argument to be a function or undefined"_s);
 
-    // 22.2.3.25
+    // https://tc39.es/ecma262/#sec-%typedarray%.prototype.sort
     ViewClass* thisObject = jsCast<ViewClass*>(callFrame->thisValue());
     validateTypedArray(globalObject, thisObject);
     RETURN_IF_EXCEPTION(scope, { });

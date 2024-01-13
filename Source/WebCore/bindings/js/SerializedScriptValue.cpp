@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2009-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2009-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -69,6 +69,7 @@
 #include "WebCodecsEncodedVideoChunk.h"
 #include "WebCoreJSClientData.h"
 #include <JavaScriptCore/APICast.h>
+#include <JavaScriptCore/ArrayConventions.h>
 #include <JavaScriptCore/BigIntObject.h>
 #include <JavaScriptCore/BooleanObject.h>
 #include <JavaScriptCore/CatchScope.h>
@@ -184,9 +185,7 @@ enum SerializationTag {
     MapObjectTag = 30,
     NonMapPropertiesTag = 31,
     NonSetPropertiesTag = 32,
-#if ENABLE(WEB_CRYPTO)
     CryptoKeyTag = 33,
-#endif
     SharedArrayBufferTag = 34,
 #if ENABLE(WEBASSEMBLY)
     WasmModuleTag = 35,
@@ -300,9 +299,7 @@ static bool isTypeExposedToGlobalObject(JSC::JSGlobalObject& globalObject, Seria
     case FileListTag:
     case ImageDataTag:
     case BlobTag:
-#if ENABLE(WEB_CRYPTO)
     case CryptoKeyTag:
-#endif
     case DOMPointReadOnlyTag:
     case DOMPointTag:
     case DOMRectReadOnlyTag:
@@ -443,8 +440,6 @@ static String agentClusterIDFromGlobalObject(JSGlobalObject& globalObject)
 }
 #endif
 
-#if ENABLE(WEB_CRYPTO)
-
 const uint32_t currentKeyFormatVersion = 1;
 
 enum class CryptoKeyClassSubtag {
@@ -519,8 +514,6 @@ enum class CryptoKeyOKPOpNameTag {
 const uint8_t cryptoKeyOKPOpNameTagMaximumValue = 1;
 
 
-#endif
-
 /* CurrentVersion tracks the serialization version so that persistent stores
  * are able to correctly bail out in the case of encountering newer formats.
  *
@@ -539,8 +532,9 @@ const uint8_t cryptoKeyOKPOpNameTagMaximumValue = 1;
  * Version 12. added support for agent cluster ID.
  * Version 13. added support for ErrorInstance objects.
  * Version 14. encode booleans as uint8_t instead of int32_t.
+ * Version 15. changed the terminator of the indexed property section in array.
  */
-static constexpr unsigned CurrentVersion = 14;
+static constexpr unsigned CurrentVersion = 15;
 static constexpr unsigned TerminatorTag = 0xFFFFFFFF;
 static constexpr unsigned StringPoolTag = 0xFFFFFFFE;
 static constexpr unsigned NonIndexPropertiesTag = 0xFFFFFFFD;
@@ -548,6 +542,8 @@ static constexpr uint32_t ImageDataPoolTag = 0xFFFFFFFE;
 
 // The high bit of a StringData's length determines the character size.
 static constexpr unsigned StringDataIs8BitFlag = 0x80000000;
+
+static_assert(TerminatorTag > MAX_ARRAY_INDEX);
 
 /*
  * Object serialization is performed according to the following grammar, all tags
@@ -561,7 +557,7 @@ static constexpr unsigned StringDataIs8BitFlag = 0x80000000;
  * Value :- Array | Object | Map | Set | Terminal
  *
  * Array :-
- *     ArrayTag <length:uint32_t>(<index:uint32_t><value:Value>)* TerminatorTag
+ *     ArrayTag <length:uint32_t>(<index:uint32_t><value:Value>)* TerminatorTag (NonIndexPropertiesTag (<name:StringData><value:Value>)*) TerminatorTag
  *
  * Object :-
  *     ObjectTag (<name:StringData><value:Value>)* TerminatorTag
@@ -752,7 +748,6 @@ protected:
     MarkedArgumentBuffer m_gcBuffer;
 };
 
-#if ENABLE(WEB_CRYPTO)
 static bool wrapCryptoKey(JSGlobalObject* lexicalGlobalObject, const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey)
 {
     auto context = executionContext(lexicalGlobalObject);
@@ -764,7 +759,6 @@ static bool unwrapCryptoKey(JSGlobalObject* lexicalGlobalObject, const Vector<ui
     auto context = executionContext(lexicalGlobalObject);
     return context && context->unwrapCryptoKey(wrappedKey, key);
 }
-#endif
 
 #if ASSUME_LITTLE_ENDIAN
 template <typename T> static void writeLittleEndian(Vector<uint8_t>& buffer, T value)
@@ -1347,13 +1341,13 @@ private:
         // FIXME: We should try to avoid converting pixel format.
         PixelBufferFormat format { AlphaPremultiplication::Premultiplied, PixelFormat::RGBA8, buffer->colorSpace() };
         const IntSize& logicalSize = buffer->truncatedLogicalSize();
-        auto pixelBuffer = buffer->getPixelBuffer(format, { IntPoint::zero(), logicalSize });
-        if (!is<ByteArrayPixelBuffer>(pixelBuffer)) {
+        auto pixelBuffer = dynamicDowncast<ByteArrayPixelBuffer>(buffer->getPixelBuffer(format, { IntPoint::zero(), logicalSize }));
+        if (!pixelBuffer) {
             code = SerializationReturnCode::ValidationError;
             return;
         }
 
-        auto arrayBuffer = downcast<ByteArrayPixelBuffer>(*pixelBuffer).data().possiblySharedBuffer();
+        auto arrayBuffer = pixelBuffer->data().possiblySharedBuffer();
         if (!arrayBuffer) {
             code = SerializationReturnCode::ValidationError;
             return;
@@ -1721,7 +1715,6 @@ private:
                 recordObject(obj);
                 return success;
             }
-#if ENABLE(WEB_CRYPTO)
             if (auto* key = JSCryptoKey::toWrapped(vm, obj)) {
                 write(CryptoKeyTag);
                 Vector<uint8_t> serializedKey;
@@ -1770,7 +1763,6 @@ private:
                 write(wrappedKey);
                 return true;
             }
-#endif
 #if ENABLE(WEB_RTC)
             if (auto* rtcCertificate = JSRTCCertificate::toWrapped(vm, obj)) {
                 write(RTCCertificateTag);
@@ -1903,7 +1895,6 @@ private:
         writeLittleEndian<uint8_t>(m_buffer, static_cast<uint8_t>(tag));
     }
 
-#if ENABLE(WEB_CRYPTO)
     void write(CryptoKeyClassSubtag tag)
     {
         writeLittleEndian<uint8_t>(m_buffer, static_cast<uint8_t>(tag));
@@ -1928,7 +1919,6 @@ private:
     {
         writeLittleEndian<uint8_t>(m_buffer, static_cast<uint8_t>(tag));
     }
-#endif
 
     void write(bool b)
     {
@@ -2139,7 +2129,6 @@ private:
         write(DestinationColorSpaceSRGBTag);
     }
 
-#if ENABLE(WEB_CRYPTO)
     void write(CryptoKeyOKP::NamedCurve curve)
     {
         switch (curve) {
@@ -2344,7 +2333,6 @@ private:
             break;
         }
     }
-#endif
 
     void write(const uint8_t* data, unsigned length)
     {
@@ -2425,6 +2413,7 @@ SerializationReturnCode CloneSerializer::serialize(JSValue in)
                 if (index == lengthStack.last()) {
                     indexStack.removeLast();
                     lengthStack.removeLast();
+                    write(TerminatorTag); // Terminate the indexed property section.
 
                     propertyStack.append(PropertyNameArray(vm, PropertyNameMode::Strings, PrivateSymbolMode::Exclude));
                     array->getOwnNonIndexPropertyNames(m_lexicalGlobalObject, propertyStack.last(), DontEnumPropertiesMode::Exclude);
@@ -3238,43 +3227,40 @@ private:
                 return false;
         }
 
+        auto makeArrayBufferView = [&] (auto view) -> bool {
+            if (!view)
+                return false;
+            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, WTFMove(view));
+            if (!arrayBufferView)
+                return false;
+            return true;
+        };
+
         switch (arrayBufferViewSubtag) {
         case DataViewTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, DataView::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(DataView::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Int8ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Int8Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Int8Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Uint8ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Uint8Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Uint8Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Uint8ClampedArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Uint8ClampedArray::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Uint8ClampedArray::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Int16ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Int16Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Int16Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Uint16ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Uint16Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Uint16Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Int32ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Int32Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Int32Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Uint32ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Uint32Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Uint32Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Float32ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Float32Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Float32Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case Float64ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, Float64Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(Float64Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case BigInt64ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, BigInt64Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(BigInt64Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         case BigUint64ArrayTag:
-            arrayBufferView = toJS(m_lexicalGlobalObject, m_globalObject, BigUint64Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
-            return true;
+            return makeArrayBufferView(BigUint64Array::wrappedAs(arrayBuffer.releaseNonNull(), byteOffset, length).get());
         default:
             return false;
         }
@@ -3404,7 +3390,6 @@ private:
         return false;
     }
 
-#if ENABLE(WEB_CRYPTO)
     bool read(CryptoKeyOKP::NamedCurve& result)
     {
         uint8_t nameTag;
@@ -3776,7 +3761,6 @@ private:
         cryptoKey = getJSValue(result.get());
         return true;
     }
-#endif
 
     bool read(SerializableErrorType& errorType)
     {
@@ -4267,8 +4251,10 @@ private:
     JSValue readTerminal()
     {
         SerializationTag tag = readTag();
-        if (!isTypeExposedToGlobalObject(*m_globalObject, tag))
+        if (!isTypeExposedToGlobalObject(*m_globalObject, tag)) {
+            fail();
             return JSValue();
+        }
         switch (tag) {
         case UndefinedTag:
             return jsUndefined();
@@ -4490,7 +4476,7 @@ private:
                 fail();
                 return JSValue();
             }
-            return ErrorInstance::create(m_lexicalGlobalObject, WTFMove(message), toErrorType(serializedErrorType), line, column, WTFMove(sourceURL), WTFMove(stackString));
+            return ErrorInstance::create(m_lexicalGlobalObject, WTFMove(message), toErrorType(serializedErrorType), { line, column }, WTFMove(sourceURL), WTFMove(stackString));
         }
         case ObjectReferenceTag: {
             auto index = readConstantPoolIndex(m_gcBuffer);
@@ -4659,7 +4645,6 @@ private:
             m_gcBuffer.appendWithCrashOnOverflow(arrayBufferView);
             return arrayBufferView;
         }
-#if ENABLE(WEB_CRYPTO)
         case CryptoKeyTag: {
             Vector<uint8_t> wrappedKey;
             if (!read(wrappedKey)) {
@@ -4681,7 +4666,6 @@ private:
             m_gcBuffer.appendWithCrashOnOverflow(cryptoKey);
             return cryptoKey;
         }
-#endif
         case DOMPointReadOnlyTag:
             return readDOMPoint<DOMPointReadOnly>();
         case DOMPointTag:
@@ -4834,13 +4818,33 @@ DeserializationResult CloneDeserializer::deserialize()
                 fail();
                 goto error;
             }
-            if (index == TerminatorTag) {
-                JSObject* outArray = outputObjectStack.last();
-                outValue = outArray;
-                outputObjectStack.removeLast();
-                break;
-            } else if (index == NonIndexPropertiesTag) {
-                goto objectStartVisitMember;
+
+            if (m_version >= 15) {
+                if (index == TerminatorTag) {
+                    // We reached the end of the indexed properties section.
+                    if (!read(index)) {
+                        fail();
+                        goto error;
+                    }
+                    // At this point, we're either done with the array or is starting the
+                    // non-indexed property section.
+                    if (index == TerminatorTag) {
+                        JSObject* outArray = outputObjectStack.last();
+                        outValue = outArray;
+                        outputObjectStack.removeLast();
+                        break;
+                    }
+                    if (index == NonIndexPropertiesTag)
+                        goto objectStartVisitMember;
+                }
+            } else {
+                if (index == TerminatorTag) {
+                    JSObject* outArray = outputObjectStack.last();
+                    outValue = outArray;
+                    outputObjectStack.removeLast();
+                    break;
+                } else if (index == NonIndexPropertiesTag)
+                    goto objectStartVisitMember;
             }
 
             if (JSValue terminal = readTerminal()) {
@@ -4983,7 +4987,7 @@ SerializedScriptValue::~SerializedScriptValue() = default;
 
 SerializedScriptValue::SerializedScriptValue(Vector<uint8_t>&& buffer, std::unique_ptr<ArrayBufferContentsArray>&& arrayBufferContentsArray
 #if ENABLE(WEB_RTC)
-        , Vector<std::unique_ptr<DetachedRTCDataChannel>>&& detachedRTCDataChannels
+    , Vector<std::unique_ptr<DetachedRTCDataChannel>>&& detachedRTCDataChannels
 #endif
 #if ENABLE(WEB_CODECS)
     , Vector<RefPtr<WebCodecsEncodedVideoChunkStorage>>&& serializedVideoChunks
@@ -4992,19 +4996,21 @@ SerializedScriptValue::SerializedScriptValue(Vector<uint8_t>&& buffer, std::uniq
     , Vector<WebCodecsAudioInternalData>&& serializedAudioData
 #endif
         )
-    : m_data(WTFMove(buffer))
-    , m_arrayBufferContentsArray(WTFMove(arrayBufferContentsArray))
+    : m_internals {
+        .data = WTFMove(buffer)
+        , .arrayBufferContentsArray = WTFMove(arrayBufferContentsArray)
 #if ENABLE(WEB_RTC)
-    , m_detachedRTCDataChannels(WTFMove(detachedRTCDataChannels))
+        , .detachedRTCDataChannels = WTFMove(detachedRTCDataChannels)
 #endif
 #if ENABLE(WEB_CODECS)
-    , m_serializedVideoChunks(WTFMove(serializedVideoChunks))
-    , m_serializedVideoFrames(WTFMove(serializedVideoFrames))
-    , m_serializedAudioChunks(WTFMove(serializedAudioChunks))
-    , m_serializedAudioData(WTFMove(serializedAudioData))
+        , .serializedVideoChunks = WTFMove(serializedVideoChunks)
+        , .serializedAudioChunks = WTFMove(serializedAudioChunks)
+        , .serializedVideoFrames = WTFMove(serializedVideoFrames)
+        , .serializedAudioData = WTFMove(serializedAudioData)
 #endif
+    }
 {
-    m_memoryCost = computeMemoryCost();
+    m_internals.memoryCost = computeMemoryCost();
 }
 
 SerializedScriptValue::SerializedScriptValue(Vector<uint8_t>&& buffer, Vector<URLKeepingBlobAlive>&& blobHandles, std::unique_ptr<ArrayBufferContentsArray> arrayBufferContentsArray, std::unique_ptr<ArrayBufferContentsArray> sharedBufferContentsArray, Vector<std::optional<ImageBitmapBacking>>&& backingStores
@@ -5027,87 +5033,94 @@ SerializedScriptValue::SerializedScriptValue(Vector<uint8_t>&& buffer, Vector<UR
         , Vector<WebCodecsAudioInternalData>&& serializedAudioData
 #endif
         )
-    : m_data(WTFMove(buffer))
-    , m_arrayBufferContentsArray(WTFMove(arrayBufferContentsArray))
-    , m_sharedBufferContentsArray(WTFMove(sharedBufferContentsArray))
-    , m_backingStores(WTFMove(backingStores))
-#if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
-    , m_detachedOffscreenCanvases(WTFMove(detachedOffscreenCanvases))
-    , m_inMemoryOffscreenCanvases(WTFMove(inMemoryOffscreenCanvases))
-#endif
-    , m_inMemoryMessagePorts(WTFMove(inMemoryMessagePorts))
+    : m_internals {
+        .data = WTFMove(buffer)
+        , .arrayBufferContentsArray = WTFMove(arrayBufferContentsArray)
 #if ENABLE(WEB_RTC)
-    , m_detachedRTCDataChannels(WTFMove(detachedRTCDataChannels))
-#endif
-#if ENABLE(WEBASSEMBLY)
-    , m_wasmModulesArray(WTFMove(wasmModulesArray))
-    , m_wasmMemoryHandlesArray(WTFMove(wasmMemoryHandlesArray))
+        , .detachedRTCDataChannels = WTFMove(detachedRTCDataChannels)
 #endif
 #if ENABLE(WEB_CODECS)
-    , m_serializedVideoChunks(WTFMove(serializedVideoChunks))
-    , m_serializedVideoFrames(WTFMove(serializedVideoFrames))
-    , m_serializedAudioChunks(WTFMove(serializedAudioChunks))
-    , m_serializedAudioData(WTFMove(serializedAudioData))
+        , .serializedVideoChunks = WTFMove(serializedVideoChunks)
+        , .serializedAudioChunks = WTFMove(serializedAudioChunks)
+        , .serializedVideoFrames = WTFMove(serializedVideoFrames)
+        , .serializedAudioData = WTFMove(serializedAudioData)
 #endif
-    , m_blobHandles(crossThreadCopy(WTFMove(blobHandles)))
+        , .sharedBufferContentsArray = WTFMove(sharedBufferContentsArray)
+        , .backingStores = WTFMove(backingStores)
+#if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
+        , .detachedOffscreenCanvases = WTFMove(detachedOffscreenCanvases)
+        , .inMemoryOffscreenCanvases = WTFMove(inMemoryOffscreenCanvases)
+#endif
+        , .inMemoryMessagePorts = WTFMove(inMemoryMessagePorts)
+#if ENABLE(WEBASSEMBLY)
+        , .wasmModulesArray = WTFMove(wasmModulesArray)
+        , .wasmMemoryHandlesArray = WTFMove(wasmMemoryHandlesArray)
+#endif
+        , .blobHandles = crossThreadCopy(WTFMove(blobHandles))
+    }
 {
-    m_memoryCost = computeMemoryCost();
+    m_internals.memoryCost = computeMemoryCost();
+}
+
+SerializedScriptValue::SerializedScriptValue(Internals&& internals)
+    : m_internals(WTFMove(internals))
+{
 }
 
 size_t SerializedScriptValue::computeMemoryCost() const
 {
-    size_t cost = m_data.size();
+    size_t cost = m_internals.data.size();
 
-    if (m_arrayBufferContentsArray) {
-        for (auto& content : *m_arrayBufferContentsArray)
+    if (m_internals.arrayBufferContentsArray) {
+        for (auto& content : *m_internals.arrayBufferContentsArray)
             cost += content.sizeInBytes();
     }
 
-    if (m_sharedBufferContentsArray) {
-        for (auto& content : *m_sharedBufferContentsArray)
+    if (m_internals.sharedBufferContentsArray) {
+        for (auto& content : *m_internals.sharedBufferContentsArray)
             cost += content.sizeInBytes();
     }
 
-    for (auto& backingStore : m_backingStores) {
+    for (auto& backingStore : m_internals.backingStores) {
         if (auto buffer = backingStore ? backingStore->buffer() : nullptr)
             cost += buffer->memoryCost();
     }
 
 #if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
-    for (auto& canvas : m_detachedOffscreenCanvases) {
+    for (auto& canvas : m_internals.detachedOffscreenCanvases) {
         if (canvas)
             cost += canvas->memoryCost();
     }
 #endif
 #if ENABLE(WEB_RTC)
-    for (auto& channel : m_detachedRTCDataChannels) {
+    for (auto& channel : m_internals.detachedRTCDataChannels) {
         if (channel)
             cost += channel->memoryCost();
     }
 #endif
 #if ENABLE(WEBASSEMBLY)
     // We are not supporting WebAssembly Module memory estimation yet.
-    if (m_wasmMemoryHandlesArray) {
-        for (auto& content : *m_wasmMemoryHandlesArray)
+    if (m_internals.wasmMemoryHandlesArray) {
+        for (auto& content : *m_internals.wasmMemoryHandlesArray)
             cost += content->sizeInBytes(std::memory_order_relaxed);
     }
 #endif
 #if ENABLE(WEB_CODECS)
-    for (auto& chunk : m_serializedVideoChunks) {
+    for (auto& chunk : m_internals.serializedVideoChunks) {
         if (chunk)
             cost += chunk->memoryCost();
     }
-    for (auto& frame : m_serializedVideoFrames)
+    for (auto& frame : m_internals.serializedVideoFrames)
         cost += frame.memoryCost();
-    for (auto& chunk : m_serializedAudioChunks) {
+    for (auto& chunk : m_internals.serializedAudioChunks) {
         if (chunk)
             cost += chunk->memoryCost();
     }
-    for (auto& data : m_serializedAudioData)
+    for (auto& data : m_internals.serializedAudioData)
         cost += data.memoryCost();
 #endif
 
-    for (auto& handle : m_blobHandles)
+    for (auto& handle : m_internals.blobHandles)
         cost += handle.url().string().sizeInBytes();
 
     return cost;
@@ -5260,7 +5273,7 @@ ExceptionOr<Ref<SerializedScriptValue>> SerializedScriptValue::create(JSGlobalOb
         if (auto arrayBuffer = toPossiblySharedArrayBuffer(vm, transferable.get())) {
             if (arrayBuffer->isDetached() || arrayBuffer->isShared())
                 return Exception { ExceptionCode::DataCloneError };
-            if (arrayBuffer->isLocked()) {
+            if (!arrayBuffer->isDetachable()) {
                 auto scope = DECLARE_THROW_SCOPE(vm);
                 throwVMTypeError(&lexicalGlobalObject, scope, errorMessageForTransfer(arrayBuffer));
                 return Exception { ExceptionCode::ExistingExceptionError };
@@ -5375,7 +5388,9 @@ ExceptionOr<Ref<SerializedScriptValue>> SerializedScriptValue::create(JSGlobalOb
     if (arrayBufferContentsArray.hasException())
         return arrayBufferContentsArray.releaseException();
 
-    auto backingStores = ImageBitmap::detachBitmaps(WTFMove(imageBitmaps));
+    auto detachedImageBitmaps = map(WTFMove(imageBitmaps), [](auto&& imageBitmap) -> std::optional<ImageBitmapBacking> {
+        return imageBitmap->detach();
+    });
 
 #if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
     Vector<std::unique_ptr<DetachedOffscreenCanvas>> detachedCanvases;
@@ -5397,7 +5412,7 @@ ExceptionOr<Ref<SerializedScriptValue>> SerializedScriptValue::create(JSGlobalOb
         audioData->close();
 #endif
 
-    return adoptRef(*new SerializedScriptValue(WTFMove(buffer), WTFMove(blobHandles), arrayBufferContentsArray.releaseReturnValue(), context == SerializationContext::WorkerPostMessage ? WTFMove(sharedBuffers) : nullptr, WTFMove(backingStores)
+    return adoptRef(*new SerializedScriptValue(WTFMove(buffer), WTFMove(blobHandles), arrayBufferContentsArray.releaseReturnValue(), context == SerializationContext::WorkerPostMessage ? WTFMove(sharedBuffers) : nullptr, WTFMove(detachedImageBitmaps)
 #if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
                 , WTFMove(detachedCanvases)
                 , WTFMove(inMemoryOffscreenCanvases)
@@ -5448,7 +5463,7 @@ RefPtr<SerializedScriptValue> SerializedScriptValue::create(JSContextRef originC
 
 String SerializedScriptValue::toString() const
 {
-    return CloneDeserializer::deserializeString(m_data);
+    return CloneDeserializer::deserializeString(m_internals.data);
 }
 
 JSValue SerializedScriptValue::deserialize(JSGlobalObject& lexicalGlobalObject, JSGlobalObject* globalObject, SerializationErrorMode throwExceptions, bool* didFail)
@@ -5465,25 +5480,25 @@ JSValue SerializedScriptValue::deserialize(JSGlobalObject& lexicalGlobalObject, 
 
 JSValue SerializedScriptValue::deserialize(JSGlobalObject& lexicalGlobalObject, JSGlobalObject* globalObject, const Vector<RefPtr<MessagePort>>& messagePorts, const Vector<String>& blobURLs, const Vector<String>& blobFilePaths, SerializationErrorMode throwExceptions, bool* didFail)
 {
-    DeserializationResult result = CloneDeserializer::deserialize(&lexicalGlobalObject, globalObject, messagePorts, WTFMove(m_backingStores)
+    DeserializationResult result = CloneDeserializer::deserialize(&lexicalGlobalObject, globalObject, messagePorts, WTFMove(m_internals.backingStores)
 #if ENABLE(OFFSCREEN_CANVAS_IN_WORKERS)
-        , WTFMove(m_detachedOffscreenCanvases)
-        , m_inMemoryOffscreenCanvases
+        , WTFMove(m_internals.detachedOffscreenCanvases)
+        , m_internals.inMemoryOffscreenCanvases
 #endif
-        , m_inMemoryMessagePorts
+        , m_internals.inMemoryMessagePorts
 #if ENABLE(WEB_RTC)
-        , WTFMove(m_detachedRTCDataChannels)
+        , WTFMove(m_internals.detachedRTCDataChannels)
 #endif
-        , m_arrayBufferContentsArray.get(), m_data, blobURLs, blobFilePaths, m_sharedBufferContentsArray.get()
+        , m_internals.arrayBufferContentsArray.get(), m_internals.data, blobURLs, blobFilePaths, m_internals.sharedBufferContentsArray.get()
 #if ENABLE(WEBASSEMBLY)
-        , m_wasmModulesArray.get()
-        , m_wasmMemoryHandlesArray.get()
+        , m_internals.wasmModulesArray.get()
+        , m_internals.wasmMemoryHandlesArray.get()
 #endif
 #if ENABLE(WEB_CODECS)
-        , WTFMove(m_serializedVideoChunks)
-        , WTFMove(m_serializedVideoFrames)
-        , WTFMove(m_serializedAudioChunks)
-        , WTFMove(m_serializedAudioData)
+        , WTFMove(m_internals.serializedVideoChunks)
+        , WTFMove(m_internals.serializedVideoFrames)
+        , WTFMove(m_internals.serializedAudioChunks)
+        , WTFMove(m_internals.serializedAudioData)
 #endif
         );
     if (didFail)
@@ -5523,7 +5538,7 @@ uint32_t SerializedScriptValue::wireFormatVersion()
 
 Vector<String> SerializedScriptValue::blobURLs() const
 {
-    return m_blobHandles.map([](auto& handle) {
+    return m_internals.blobHandles.map([](auto& handle) {
         return handle.url().string().isolatedCopy();
     });
 }
@@ -5543,7 +5558,7 @@ void SerializedScriptValue::writeBlobsToDiskForIndexedDB(CompletionHandler<void(
             return;
         }
 
-        ASSERT(m_blobHandles.size() == blobFilePaths.size());
+        ASSERT(m_internals.blobHandles.size() == blobFilePaths.size());
 
         completionHandler({ *this, blobURLs(), blobFilePaths });
     });

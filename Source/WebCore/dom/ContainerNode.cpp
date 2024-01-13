@@ -47,7 +47,6 @@
 #include "LabelsNodeList.h"
 #include "LocalFrameView.h"
 #include "MutationEvent.h"
-#include "NameNodeList.h"
 #include "NodeRareData.h"
 #include "NodeRenderStyle.h"
 #include "RadioNodeList.h"
@@ -81,8 +80,6 @@ static_assert(sizeof(ContainerNode) == sizeof(SameSizeAsContainerNode), "Contain
 static void dispatchChildInsertionEvents(Node&);
 static void dispatchChildRemovalEvents(Ref<Node>&);
 
-ChildNodesLazySnapshot* ChildNodesLazySnapshot::latestSnapshot;
-
 unsigned ScriptDisallowedScope::s_count = 0;
 #if ASSERT_ENABLED
 ScriptDisallowedScope::EventAllowedScope* ScriptDisallowedScope::EventAllowedScope::s_currentScope = nullptr;
@@ -96,9 +93,6 @@ ALWAYS_INLINE auto ContainerNode::removeAllChildrenWithScriptAssertion(ChildChan
     if (UNLIKELY(isDocumentFragmentForInnerOuterHTML())) {
         ScriptDisallowedScope::InMainThread scriptDisallowedScope;
         RELEASE_ASSERT(!connectedSubframeCount() && !hasRareData() && !wrapper());
-#if !DUMP_NODE_STATISTICS
-        ASSERT(!weakPtrFactory().isInitialized());
-#endif
         bool hadElementChild = false;
         while (RefPtr child = m_firstChild) {
             hadElementChild |= is<Element>(*child);
@@ -1025,11 +1019,6 @@ Ref<HTMLCollection> ContainerNode::getElementsByTagNameNS(const AtomString& name
 {
     ASSERT(!localName.isNull());
     return ensureRareData().ensureNodeLists().addCachedTagCollectionNS(*this, namespaceURI.isEmpty() ? nullAtom() : namespaceURI, localName);
-}
-
-Ref<NodeList> ContainerNode::getElementsByName(const AtomString& elementName)
-{
-    return ensureRareData().ensureNodeLists().addCacheWithAtomName<NameNodeList>(*this, elementName);
 }
 
 Ref<HTMLCollection> ContainerNode::getElementsByClassName(const AtomString& classNames)

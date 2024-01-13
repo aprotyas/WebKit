@@ -1275,7 +1275,12 @@ sub GeneratePut
     }
 
     push(@$outputArray, "    throwScope.assertNoException();\n");
-    if (InstanceOverridesDefineOwnProperty($interface)) {
+    if (InstanceOverridesDefineOwnProperty($interface) && (InstanceOverridesNamedDefineOwnProperty($interface) || !$indexedSetterOperation)) {
+        if (!InstanceOverridesNamedDefineOwnProperty($interface)) {
+            push(@$outputArray, "    if (!parseIndex(propertyName))\n");
+            push(@$outputArray, "        RELEASE_AND_RETURN(throwScope, JSObject::put(thisObject, lexicalGlobalObject, propertyName, value, putPropertySlot));\n\n");
+        }
+
         if (InstanceOverridesGetOwnPropertySlot($interface) && !$interface->extendedAttributes->{CustomGetOwnPropertySlot}) {
             push(@$outputArray, "    PropertyDescriptor ownDescriptor;\n");
             push(@$outputArray, "    PropertySlot slot(thisObject, PropertySlot::InternalMethodType::GetOwnProperty);;\n");
@@ -2289,14 +2294,27 @@ sub InstanceOverridesPut
         || GetNamedGetterOperation($interface);
 }
 
-sub InstanceOverridesDefineOwnProperty
+sub InstanceOverridesIndexedDefineOwnProperty
 {
     my $interface = shift;
     return $interface->extendedAttributes->{CustomDefineOwnProperty}
         || GetIndexedSetterOperation($interface)
-        || GetIndexedGetterOperation($interface)
+        || GetIndexedGetterOperation($interface);
+}
+
+sub InstanceOverridesNamedDefineOwnProperty
+{
+    my $interface = shift;
+    return $interface->extendedAttributes->{CustomDefineOwnProperty}
         || GetNamedSetterOperation($interface)
         || GetNamedGetterOperation($interface);
+}
+
+sub InstanceOverridesDefineOwnProperty
+{
+    my $interface = shift;
+    return InstanceOverridesIndexedDefineOwnProperty($interface)
+        || InstanceOverridesNamedDefineOwnProperty($interface);
 }
 
 sub InstanceOverridesDeleteProperty
@@ -6222,7 +6240,6 @@ sub GenerateCallWith
         push(@$outputArray, $indent . "auto* context = ${scriptExecutionContextAccessor}->scriptExecutionContext();\n");
         push(@$outputArray, $indent . "if (UNLIKELY(!context))\n");
         push(@$outputArray, $indent . "    return" . ($contextMissing ? " " . $contextMissing : "") . ";\n");
-        push(@$outputArray, $indent . "ASSERT(context->isDocument());\n");
         push(@$outputArray, $indent . "auto& document = downcast<Document>(*context);\n");
         push(@callWithArgs, "document");
     }
@@ -6232,7 +6249,6 @@ sub GenerateCallWith
         push(@$outputArray, $indent . "auto* context = ${relevantGlobalObjectPointer}->scriptExecutionContext();\n");
         push(@$outputArray, $indent . "if (UNLIKELY(!context))\n");
         push(@$outputArray, $indent . "    return" . ($contextMissing ? " " . $contextMissing : "") . ";\n");
-        push(@$outputArray, $indent . "ASSERT(context->isDocument());\n");
         push(@$outputArray, $indent . "auto& document = downcast<Document>(*context);\n");
         push(@callWithArgs, "document");
     }
@@ -6656,7 +6672,12 @@ sub GenerateCallbackHeaderContent
 
             foreach my $argument (@{$operation->arguments}) {
                 my $IDLType = GetIDLType($interfaceOrCallback, $argument->type);
-                push(@arguments, "typename ${IDLType}::ParameterType " . $argument->name);
+                if ($argument->isVariadic) {
+                    AddToIncludes("JSDOMConvertVariadic.h", $includesRef, 1);
+                    push(@arguments, "FixedVector<typename VariadicConverter<${IDLType}>::Item>&& " . $argument->name);
+                } else {
+                    push(@arguments, "typename ${IDLType}::ParameterType " . $argument->name);
+                }
             }
 
             my $nativeReturnType = "CallbackResult<typename " . GetIDLType($interfaceOrCallback, $operation->type) . "::ImplementationType>";
@@ -6697,6 +6718,7 @@ sub GenerateCallbackImplementationContent
     my $className = "JS${name}";
 
     $includesRef->{"ScriptExecutionContext.h"} = 1;
+    $includesRef->{"ContextDestructionObserverInlines.h"} = 1;
 
     # Constructor
     push(@$contentRef, "${className}::${className}(JSObject* callback, JSDOMGlobalObject* globalObject)\n");
@@ -6798,9 +6820,13 @@ sub GenerateCallbackImplementationContent
             }
 
             foreach my $argument (@{$operation->arguments}) {
-                AddToIncludesForIDLType($argument->type, $includesRef, 1);
                 my $IDLType = GetIDLType($interfaceOrCallback, $argument->type);
-                push(@arguments, "typename ${IDLType}::ParameterType " . $argument->name);
+                if ($argument->isVariadic) {
+                    push(@arguments, "FixedVector<typename VariadicConverter<${IDLType}>::Item>&& " . $argument->name);
+                } else {
+                    AddToIncludesForIDLType($argument->type, $includesRef, 1);
+                    push(@arguments, "typename ${IDLType}::ParameterType " . $argument->name);
+                }
             }
             
             push(@$contentRef, "${nativeReturnType} ${className}::${functionImplementationName}(" . join(", ", @arguments) . ")\n");
@@ -6824,7 +6850,14 @@ sub GenerateCallbackImplementationContent
             push(@$contentRef, "    MarkedArgumentBuffer args;\n");
 
             foreach my $argument (@{$operation->arguments}) {
-                push(@$contentRef, "    args.append(" . NativeToJSValueUsingReferences($argument, $interfaceOrCallback, $argument->name, "globalObject") . ");\n");
+                if ($argument->isVariadic) {
+                    my $argumentName = $argument->name;
+                    push(@$contentRef, "    for (auto&& ${argumentName}Item : WTFMove(${argumentName})) {\n");
+                    push(@$contentRef, "        args.append(" . NativeToJSValueUsingReferences($argument, $interfaceOrCallback, "WTFMove(${argumentName}Item)", "globalObject") . ");\n");
+                    push(@$contentRef, "    }\n");
+                } else {
+                    push(@$contentRef, "    args.append(" . NativeToJSValueUsingReferences($argument, $interfaceOrCallback, $argument->name, "globalObject") . ");\n");
+                }
             }
             push(@$contentRef, "    ASSERT(!args.hasOverflowed());\n");
 

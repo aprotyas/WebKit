@@ -80,33 +80,40 @@ enum class StyleDifferenceContextSensitiveProperty : uint8_t {
 };
 
 // Static pseudo styles. Dynamic ones are produced on the fly.
-enum class PseudoId : uint16_t {
+enum class PseudoId : uint32_t {
     // The order must be None, public IDs, and then internal IDs.
     None,
 
     // Public:
     FirstLine,
     FirstLetter,
+    GrammarError,
     Highlight,
     Marker,
     Before,
     After,
     Selection,
     Backdrop,
-    Scrollbar,
+    WebKitScrollbar,
+    SpellingError,
+    ViewTransition,
+    ViewTransitionGroup,
+    ViewTransitionImagePair,
+    ViewTransitionOld,
+    ViewTransitionNew,
 
     // Internal:
-    ScrollbarThumb,
-    ScrollbarButton,
-    ScrollbarTrack,
-    ScrollbarTrackPiece,
-    ScrollbarCorner,
-    Resizer,
+    WebKitScrollbarThumb,
+    WebKitScrollbarButton,
+    WebKitScrollbarTrack,
+    WebKitScrollbarTrackPiece,
+    WebKitScrollbarCorner,
+    WebKitResizer,
 
     AfterLastInternalPseudoId,
 
     FirstPublicPseudoId = FirstLine,
-    FirstInternalPseudoId = ScrollbarThumb,
+    FirstInternalPseudoId = WebKitScrollbarThumb,
     PublicPseudoIdMask = ((1 << FirstInternalPseudoId) - 1) & ~((1 << FirstPublicPseudoId) - 1)
 };
 
@@ -1208,6 +1215,7 @@ WTF::TextStream& operator<<(WTF::TextStream&, ColumnProgression);
 WTF::TextStream& operator<<(WTF::TextStream&, ColumnSpan);
 WTF::TextStream& operator<<(WTF::TextStream&, ContentDistribution);
 WTF::TextStream& operator<<(WTF::TextStream&, ContentPosition);
+WTF::TextStream& operator<<(WTF::TextStream&, ContentVisibility);
 WTF::TextStream& operator<<(WTF::TextStream&, CursorType);
 #if ENABLE(CURSOR_VISIBILITY)
 WTF::TextStream& operator<<(WTF::TextStream&, CursorVisibility);

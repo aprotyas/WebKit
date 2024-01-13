@@ -39,7 +39,6 @@ public:
     void updateCancelButtonVisibility() const;
 
     void addSearchResult();
-    void stopSearchEventTimer();
 
     bool popupIsVisible() const { return m_searchPopupIsVisible; }
     void showPopup();
@@ -76,7 +75,6 @@ private:
     bool itemIsLabel(unsigned listIndex) const override;
     bool itemIsSelected(unsigned listIndex) const override;
     bool shouldPopOver() const override { return false; }
-    bool valueShouldChangeOnHotTrack() const override { return false; }
     void setTextFromItem(unsigned listIndex) override;
     FontSelector* fontSelector() const override;
     HostWindow* hostWindow() const override;

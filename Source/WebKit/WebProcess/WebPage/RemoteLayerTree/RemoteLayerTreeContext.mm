@@ -31,7 +31,6 @@
 #import "PlatformCALayerRemote.h"
 #import "RemoteLayerTreeDrawingArea.h"
 #import "RemoteLayerTreeTransaction.h"
-#import "RemoteLayerWithRemoteRenderingBackingStoreCollection.h"
 #import "VideoPresentationManager.h"
 #import "WebFrame.h"
 #import "WebPage.h"
@@ -50,10 +49,7 @@ using namespace WebCore;
 RemoteLayerTreeContext::RemoteLayerTreeContext(WebPage& webPage)
     : m_webPage(webPage)
 {
-    if (WebProcess::singleton().shouldUseRemoteRenderingFor(WebCore::RenderingPurpose::DOM))
-        m_backingStoreCollection = makeUnique<RemoteLayerWithRemoteRenderingBackingStoreCollection>(*this);
-    else
-        m_backingStoreCollection = makeUnique<RemoteLayerBackingStoreCollection>(*this);
+    m_backingStoreCollection = makeUnique<RemoteLayerBackingStoreCollection>(*this);
 }
 
 RemoteLayerTreeContext::~RemoteLayerTreeContext()
@@ -64,7 +60,7 @@ RemoteLayerTreeContext::~RemoteLayerTreeContext()
 
     auto graphicsLayers = m_liveGraphicsLayers;
     for (auto& layer : graphicsLayers)
-        RefPtr { layer.get() }->clearContext();
+        Ref { layer.get() }->clearContext();
 
     // Make sure containers are empty before destruction to avoid hitting the assertion in CanMakeCheckedPtr.
     m_livePlatformLayers.clear();
@@ -80,7 +76,7 @@ void RemoteLayerTreeContext::adoptLayersFromContext(RemoteLayerTreeContext& oldC
 
     auto& graphicsLayers = oldContext.m_liveGraphicsLayers;
     while (!graphicsLayers.isEmpty())
-        RefPtr { (*graphicsLayers.begin()).get() }->moveToContext(*this);
+        Ref { (*graphicsLayers.begin()).get() }->moveToContext(*this);
 }
 
 float RemoteLayerTreeContext::deviceScaleFactor() const
@@ -172,12 +168,12 @@ void RemoteLayerTreeContext::layerWillLeaveContext(PlatformCALayerRemote& layer)
 
 void RemoteLayerTreeContext::graphicsLayerDidEnterContext(GraphicsLayerCARemote& layer)
 {
-    m_liveGraphicsLayers.add(&layer);
+    m_liveGraphicsLayers.add(layer);
 }
 
 void RemoteLayerTreeContext::graphicsLayerWillLeaveContext(GraphicsLayerCARemote& layer)
 {
-    m_liveGraphicsLayers.remove(&layer);
+    m_liveGraphicsLayers.remove(layer);
 }
 
 Ref<GraphicsLayer> RemoteLayerTreeContext::createGraphicsLayer(WebCore::GraphicsLayer::Type layerType, GraphicsLayerClient& client)

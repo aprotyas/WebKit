@@ -841,7 +841,7 @@
       "nicks" : [
          "annevk"
       ],
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -1565,7 +1565,7 @@
       ],
       "github" : "charliewolfe",
       "name" : "Charlie Wolfe",
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -1991,6 +1991,18 @@
    },
    {
       "emails" : [
+         "d_parkinson@apple.com"
+      ],
+      "expertise" : "Security",
+      "github" : "darryl-apple",
+      "name" : "Darryl Parkinson",
+      "nicks" : [
+         "darryl-apple",
+         "darryl.p"
+      ]
+   },
+   {
+      "emails" : [
          "dbarton@mathscribe.com"
       ],
       "expertise" : "MathML",
@@ -2376,13 +2388,16 @@
    },
    {
       "emails" : [
+         "dm_mazzoni@apple.com",
          "dmazzoni@google.com",
          "dmazzoni@chromium.org"
       ],
+      "github" : "minorninth",
       "name" : "Dominic Mazzoni",
       "nicks" : [
          "dmazzoni"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -3661,6 +3676,13 @@
    },
    {
       "emails" : [
+         "james_e_kim@apple.com"
+      ],
+      "github" : "james-e-kim",
+      "name" : "James Kim"
+   },
+   {
+      "emails" : [
          "koz@chromium.org",
          "koz@google.com"
       ],
@@ -4311,7 +4333,8 @@
       "name" : "Joshua Hoffman",
       "nicks" : [
          "hoffmanjoshua"
-      ]
+      ],
+      "status" : "committer"
    },
    {
       "emails" : [
@@ -5077,7 +5100,8 @@
    },
    {
       "emails" : [
-         "luke@warlow.dev"
+         "luke@warlow.dev",
+         "lwarlow@igalia.com"
       ],
       "github" : "lukewarlow",
       "name" : "Luke Warlow",
@@ -5293,6 +5317,13 @@
    },
    {
       "emails" : [
+         "krzywix@apple.com"
+      ],
+      "github" : "mkrzywix",
+      "name" : "Mateusz Krzywicki"
+   },
+   {
+      "emails" : [
          "mattbaker01@gmail.com"
       ],
       "expertise" : "Web Inspector",
@@ -5411,7 +5442,7 @@
       ],
       "github" : "mdubet",
       "name" : "Matthieu Dubet",
-      "status" : "committer"
+      "status" : "reviewer"
    },
    {
       "emails" : [
@@ -5714,6 +5745,14 @@
       "expertise" : "WebKit on macOS",
       "github" : "MoeBazziGIT",
       "name" : "Moe Bazzi"
+   },
+   {
+      "emails" : [
+         "mohsinq@apple.com"
+      ],
+      "github" : "mogey",
+      "name" : "Mohsin Qureshi",
+      "status" : "committer"
    },
    {
       "emails" : [

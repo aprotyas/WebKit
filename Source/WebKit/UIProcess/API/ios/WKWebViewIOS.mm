@@ -71,6 +71,7 @@
 #import <pal/spi/ios/GraphicsServicesSPI.h>
 #import <wtf/BlockPtr.h>
 #import <wtf/Box.h>
+#import <wtf/EnumTraits.h>
 #import <wtf/FixedVector.h>
 #import <wtf/SystemTracing.h>
 #import <wtf/cocoa/RuntimeApplicationChecksCocoa.h>
@@ -177,11 +178,8 @@ static WebCore::IntDegrees deviceOrientationForUIInterfaceOrientation(UIInterfac
     CGRect bounds = self.bounds;
     _scrollView = adoptNS([[WKScrollView alloc] initWithFrame:bounds]);
     [_scrollView setInternalDelegate:self];
+    [_scrollView setBaseScrollViewDelegate:self];
     [_scrollView setBouncesZoom:YES];
-
-#if HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
-    [_scrollView _setAllowsAsyncScrollEvent:YES];
-#endif
 
     if ([_scrollView respondsToSelector:@selector(_setAvoidsJumpOnInterruptedBounce:)]) {
         [_scrollView setTracksImmediatelyWhileDecelerating:NO];
@@ -502,7 +500,7 @@ static CGSize roundScrollViewContentSize(const WebKit::WebPageProxy& page, CGSiz
         [_customContentView web_setFixedOverlayView:_customContentFixedOverlayView.get()];
 
         _perProcessState.scrollViewBackgroundColor = WebCore::Color();
-        [_scrollView setContentOffset:[self _initialContentOffsetForScrollView]];
+        [self _resetContentOffset];
         [_scrollView panGestureRecognizer].allowedTouchTypes = _scrollViewDefaultAllowedTouchTypes.get();
         [_scrollView _setScrollEnabledInternal:YES];
 
@@ -838,7 +836,7 @@ static WebCore::Color scrollViewBackgroundColor(WKWebView *webView, AllowPageBac
 
     [_contentView setFrame:self.bounds];
     [_scrollView _setBackgroundColorInternal:[_contentView backgroundColor]];
-    [_scrollView setContentOffset:[self _initialContentOffsetForScrollView]];
+    [self _resetContentOffset];
     [_scrollView setZoomScale:1];
 }
 
@@ -937,7 +935,7 @@ static void changeContentOffsetBoundedInValidRange(UIScrollView *scrollView, Web
 {
     if (_perProcessState.didDeferUpdateVisibleContentRectsForUnstableScrollView) {
         WKWEBVIEW_RELEASE_LOG("%p (pageProxyID=%llu) -[WKWebView _didCommitLayerTree:] - received a commit (%llu) while deferring visible content rect updates (dynamicViewportUpdateMode %d, needsResetViewStateAfterCommitLoadForMainFrame %d (wants commit %llu), sizeChangedSinceLastVisibleContentRectUpdate %d, [_scrollView isZoomBouncing] %d, currentlyAdjustingScrollViewInsetsForKeyboard %d)",
-        self, _page->identifier().toUInt64(), layerTreeTransaction.transactionID().toUInt64(), _perProcessState.dynamicViewportUpdateMode, _perProcessState.needsResetViewStateAfterCommitLoadForMainFrame, _perProcessState.firstPaintAfterCommitLoadTransactionID.toUInt64(), [_contentView sizeChangedSinceLastVisibleContentRectUpdate], [_scrollView isZoomBouncing], _perProcessState.currentlyAdjustingScrollViewInsetsForKeyboard);
+        self, _page->identifier().toUInt64(), layerTreeTransaction.transactionID().toUInt64(), enumToUnderlyingType(_perProcessState.dynamicViewportUpdateMode), _perProcessState.needsResetViewStateAfterCommitLoadForMainFrame, _perProcessState.firstPaintAfterCommitLoadTransactionID.toUInt64(), [_contentView sizeChangedSinceLastVisibleContentRectUpdate], [_scrollView isZoomBouncing], _perProcessState.currentlyAdjustingScrollViewInsetsForKeyboard);
     }
 
     if (_timeOfFirstVisibleContentRectUpdateWithPendingCommit) {
@@ -966,7 +964,7 @@ static void changeContentOffsetBoundedInValidRange(UIScrollView *scrollView, Web
     bool isZoomed = !WebKit::scalesAreEssentiallyEqual(layerTreeTransaction.pageScaleFactor(), layerTreeTransaction.initialScaleFactor()) && (layerTreeTransaction.pageScaleFactor() > layerTreeTransaction.initialScaleFactor());
 
     bool scrollingNeededToRevealUI = false;
-    if (_maximumUnobscuredSizeOverride) {
+    if (_overriddenLayoutParameters) {
         auto unobscuredContentRect = _page->unobscuredContentRect();
         auto maxUnobscuredSize = _page->maximumUnobscuredSize();
         auto minUnobscuredSize = _page->minimumUnobscuredSize();
@@ -1049,7 +1047,7 @@ static void changeContentOffsetBoundedInValidRange(UIScrollView *scrollView, Web
     if (![self usesStandardContentView])
         return;
 
-    LOG_WITH_STREAM(VisibleRects, stream << "-[WKWebView " << _page->identifier() << " _didCommitLayerTree:] transactionID " << layerTreeTransaction.transactionID() << " dynamicViewportUpdateMode " << (int)_perProcessState.dynamicViewportUpdateMode);
+    LOG_WITH_STREAM(VisibleRects, stream << "-[WKWebView " << _page->identifier() << " _didCommitLayerTree:] transactionID " << layerTreeTransaction.transactionID() << " dynamicViewportUpdateMode " << enumToUnderlyingType(_perProcessState.dynamicViewportUpdateMode));
 
     bool needUpdateVisibleContentRects = _page->updateLayoutViewportParameters(layerTreeTransaction);
 
@@ -1091,7 +1089,7 @@ static void changeContentOffsetBoundedInValidRange(UIScrollView *scrollView, Web
     if (_perProcessState.needsResetViewStateAfterCommitLoadForMainFrame && layerTreeTransaction.transactionID() >= _perProcessState.firstPaintAfterCommitLoadTransactionID) {
         _perProcessState.needsResetViewStateAfterCommitLoadForMainFrame = NO;
         if (![self _scrollViewIsRubberBandingForRefreshControl])
-            [_scrollView setContentOffset:[self _initialContentOffsetForScrollView]];
+            [self _resetContentOffset];
 
         if (_observedRenderingProgressEvents & _WKRenderingProgressEventFirstPaint)
             _navigationState->didFirstPaint();
@@ -1903,9 +1901,10 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
     if ([scrollView isZooming])
         *targetContentOffset = [scrollView contentOffset];
     else {
-        if ([_contentView preventsPanningInXAxis])
+        auto axesToPreventMomentumScrolling = dynamic_objc_cast<WKBaseScrollView>(scrollView).axesToPreventMomentumScrolling;
+        if ([_contentView preventsPanningInXAxis] || (axesToPreventMomentumScrolling & UIAxisHorizontal))
             targetContentOffset->x = scrollView.contentOffset.x;
-        if ([_contentView preventsPanningInYAxis])
+        if ([_contentView preventsPanningInYAxis] || (axesToPreventMomentumScrolling & UIAxisVertical))
             targetContentOffset->y = scrollView.contentOffset.y;
     }
 #if ENABLE(ASYNC_SCROLLING)
@@ -1945,29 +1944,18 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
     [self _didFinishScrolling:scrollView];
 }
 
-- (CGPoint)_scrollView:(UIScrollView *)scrollView adjustedOffsetForOffset:(CGPoint)offset translation:(CGPoint)translation startPoint:(CGPoint)start locationInView:(CGPoint)locationInView horizontalVelocity:(inout double *)hv verticalVelocity:(inout double *)vv
+#if HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
+
+#if !HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_SUBCLASS_HOOKS)
+
+- (void)_scrollView:(WKScrollView *)scrollView asynchronouslyHandleScrollEvent:(UIScrollEvent *)scrollEvent completion:(void (^)(BOOL handled))completion
 {
-    if (![_contentView preventsPanningInXAxis] && ![_contentView preventsPanningInYAxis]) {
-        [_contentView cancelPointersForGestureRecognizer:scrollView.panGestureRecognizer];
-        return offset;
-    }
-
-    CGPoint adjustedContentOffset = CGPointMake(offset.x, offset.y);
-    if ([_contentView preventsPanningInXAxis])
-        adjustedContentOffset.x = start.x;
-    if ([_contentView preventsPanningInYAxis])
-        adjustedContentOffset.y = start.y;
-
-    if ((![_contentView preventsPanningInXAxis] && adjustedContentOffset.x != start.x)
-        || (![_contentView preventsPanningInYAxis] && adjustedContentOffset.y != start.y)) {
-        [_contentView cancelPointersForGestureRecognizer:scrollView.panGestureRecognizer];
-    }
-
-    return adjustedContentOffset;
+    [self scrollView:scrollView handleScrollEvent:scrollEvent completion:completion];
 }
 
-#if HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
-- (void)_scrollView:(UIScrollView *)scrollView asynchronouslyHandleScrollEvent:(UIScrollEvent *)scrollEvent completion:(void (^)(BOOL handled))completion
+#endif // !HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_SUBCLASS_HOOKS)
+
+- (void)scrollView:(WKBaseScrollView *)scrollView handleScrollEvent:(UIScrollEvent *)scrollEvent completion:(void(^)(BOOL handled))completion
 {
     BOOL isHandledByDefault = !scrollView.scrollEnabled;
 
@@ -2035,6 +2023,7 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
     if (!isCancelable)
         completion(isHandledByDefault);
 }
+
 #endif // HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
 
 - (void)scrollViewDidScroll:(UIScrollView *)scrollView
@@ -2157,8 +2146,8 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
 
 - (WebCore::FloatSize)activeViewLayoutSize:(const CGRect&)bounds
 {
-    if (_viewLayoutSizeOverride)
-        return WebCore::FloatSize(_viewLayoutSizeOverride.value());
+    if (_overriddenLayoutParameters)
+        return WebCore::FloatSize(_overriddenLayoutParameters->viewLayoutSize);
 
     return WebCore::FloatSize(UIEdgeInsetsInsetRect(CGRectMake(0, 0, bounds.size.width, bounds.size.height), self._scrollViewSystemContentInset).size);
 }
@@ -2290,10 +2279,11 @@ static WebCore::FloatPoint constrainContentOffset(WebCore::FloatPoint contentOff
 #endif
 
     if (!self._shouldDeferGeometryUpdates) {
-        if (!_viewLayoutSizeOverride)
+        if (!_overriddenLayoutParameters) {
             [self _dispatchSetViewLayoutSize:[self activeViewLayoutSize:self.bounds]];
-        if (!_maximumUnobscuredSizeOverride)
             _page->setDefaultUnobscuredSize(WebCore::FloatSize(bounds.size));
+        }
+
         [self _recalculateViewportSizesWithMinimumViewportInset:_minimumViewportInset maximumViewportInset:_maximumViewportInset throwOnInvalidInput:NO];
 
         [self _updateDrawingAreaSize];
@@ -2553,7 +2543,7 @@ static bool scrollViewCanScroll(UIScrollView *scrollView)
 
 - (BOOL)_shouldDeferGeometryUpdates
 {
-    return _perProcessState.liveResizeParameters || _perProcessState.dynamicViewportUpdateMode != WebKit::DynamicViewportUpdateMode::NotResizing;
+    return _perProcessState.liveResizeParameters || _perProcessState.dynamicViewportUpdateMode != WebKit::DynamicViewportUpdateMode::NotResizing || _perProcessState.isAnimatingFullScreenExit;
 }
 
 - (void)_updateVisibleContentRects
@@ -2592,7 +2582,7 @@ static bool scrollViewCanScroll(UIScrollView *scrollView)
         _perProcessState.didDeferUpdateVisibleContentRectsForAnyReason = YES;
         _perProcessState.didDeferUpdateVisibleContentRectsForUnstableScrollView = YES;
         WKWEBVIEW_RELEASE_LOG("%p (pageProxyID=%llu) -[WKWebView _updateVisibleContentRects:] - scroll view state is non-stable, bailing (shouldDeferGeometryUpdates %d, dynamicViewportUpdateMode %d, needsResetViewStateAfterCommitLoadForMainFrame %d, sizeChangedSinceLastVisibleContentRectUpdate %d, [_scrollView isZoomBouncing] %d, currentlyAdjustingScrollViewInsetsForKeyboard %d)",
-            self, _page->identifier().toUInt64(), self._shouldDeferGeometryUpdates, _perProcessState.dynamicViewportUpdateMode, _perProcessState.needsResetViewStateAfterCommitLoadForMainFrame, [_contentView sizeChangedSinceLastVisibleContentRectUpdate], [_scrollView isZoomBouncing], _perProcessState.currentlyAdjustingScrollViewInsetsForKeyboard);
+            self, _page->identifier().toUInt64(), self._shouldDeferGeometryUpdates, enumToUnderlyingType(_perProcessState.dynamicViewportUpdateMode), _perProcessState.needsResetViewStateAfterCommitLoadForMainFrame, [_contentView sizeChangedSinceLastVisibleContentRectUpdate], [_scrollView isZoomBouncing], _perProcessState.currentlyAdjustingScrollViewInsetsForKeyboard);
         return;
     }
 
@@ -2670,12 +2660,18 @@ static bool scrollViewCanScroll(UIScrollView *scrollView)
 
 static WebCore::FloatSize activeMinimumUnobscuredSize(WKWebView *webView, const CGRect& bounds)
 {
-    return WebCore::FloatSize(webView->_minimumUnobscuredSizeOverride.value_or(bounds.size));
+    if (!webView->_overriddenLayoutParameters)
+        return WebCore::FloatSize(bounds.size);
+
+    return WebCore::FloatSize(webView->_overriddenLayoutParameters->minimumUnobscuredSize);
 }
 
 static WebCore::FloatSize activeMaximumUnobscuredSize(WKWebView *webView, const CGRect& bounds)
 {
-    return WebCore::FloatSize(webView->_maximumUnobscuredSizeOverride.value_or(bounds.size));
+    if (!webView->_overriddenLayoutParameters)
+        return WebCore::FloatSize(bounds.size);
+
+    return WebCore::FloatSize(webView->_overriddenLayoutParameters->maximumUnobscuredSize);
 }
 
 static WebCore::IntDegrees activeOrientation(WKWebView *webView)
@@ -2710,7 +2706,7 @@ static WebCore::IntDegrees activeOrientation(WKWebView *webView)
 
 - (void)_cancelAnimatedResize
 {
-    WKWEBVIEW_RELEASE_LOG("%p (pageProxyID=%llu) -[WKWebView _cancelAnimatedResize] dynamicViewportUpdateMode %d", self, _page->identifier().toUInt64(), _perProcessState.dynamicViewportUpdateMode);
+    WKWEBVIEW_RELEASE_LOG("%p (pageProxyID=%llu) -[WKWebView _cancelAnimatedResize] dynamicViewportUpdateMode %d", self, _page->identifier().toUInt64(), enumToUnderlyingType(_perProcessState.dynamicViewportUpdateMode));
 
     if (_perProcessState.dynamicViewportUpdateMode == WebKit::DynamicViewportUpdateMode::NotResizing)
         return;
@@ -2795,9 +2791,8 @@ static WebCore::IntDegrees activeOrientation(WKWebView *webView)
     if (!_perProcessState.lastSentViewLayoutSize || newViewLayoutSize != _perProcessState.lastSentViewLayoutSize.value() || newMinimumEffectiveDeviceWidth != _perProcessState.lastSentMinimumEffectiveDeviceWidth.value())
         [self _dispatchSetViewLayoutSize:newViewLayoutSize];
 
-    if (_minimumUnobscuredSizeOverride)
+    if (_overriddenLayoutParameters) {
         _page->setMinimumUnobscuredSize(WebCore::FloatSize(newMinimumUnobscuredSize));
-    if (_maximumUnobscuredSizeOverride) {
         _page->setDefaultUnobscuredSize(WebCore::FloatSize(newMaximumUnobscuredSize));
         _page->setMaximumUnobscuredSize(WebCore::FloatSize(newMaximumUnobscuredSize));
     }
@@ -3039,7 +3034,7 @@ static WebCore::IntDegrees activeOrientation(WKWebView *webView)
 
     _perProcessState.avoidsUnsafeArea = avoidsUnsafeArea;
 
-    if ([self _updateScrollViewContentInsetsIfNecessary] && !self._shouldDeferGeometryUpdates && !_viewLayoutSizeOverride)
+    if ([self _updateScrollViewContentInsetsIfNecessary] && !self._shouldDeferGeometryUpdates && !_overriddenLayoutParameters)
         [self _dispatchSetViewLayoutSize:[self activeViewLayoutSize:self.bounds]];
 
     [self _updateScrollViewInsetAdjustmentBehavior];
@@ -3053,6 +3048,19 @@ static WebCore::IntDegrees activeOrientation(WKWebView *webView)
 - (BOOL)_haveSetObscuredInsets
 {
     return _haveSetObscuredInsets;
+}
+
+- (void)_beginAnimatedFullScreenExit
+{
+    _perProcessState.isAnimatingFullScreenExit = YES;
+}
+
+- (void)_endAnimatedFullScreenExit
+{
+    if (std::exchange(_perProcessState.isAnimatingFullScreenExit, NO)) {
+        if (!self._shouldDeferGeometryUpdates)
+            [self _didStopDeferringGeometryUpdates];
+    }
 }
 
 #if ENABLE(FULLSCREEN_API)
@@ -3436,24 +3444,7 @@ static bool isLockdownModeWarningNeeded()
 
 - (BOOL)_hasOverriddenLayoutParameters
 {
-    return _viewLayoutSizeOverride
-        || _minimumUnobscuredSizeOverride
-        || _maximumUnobscuredSizeOverride;
-}
-
-- (std::optional<CGSize>)_viewLayoutSizeOverride
-{
-    return _viewLayoutSizeOverride;
-}
-
-- (std::optional<CGSize>)_minimumUnobscuredSizeOverride
-{
-    return _minimumUnobscuredSizeOverride;
-}
-
-- (std::optional<CGSize>)_maximumUnobscuredSizeOverride
-{
-    return _maximumUnobscuredSizeOverride;
+    return _overriddenLayoutParameters.has_value();
 }
 
 - (void)_resetObscuredInsets
@@ -3462,6 +3453,31 @@ static bool isLockdownModeWarningNeeded()
     _obscuredInsets = { };
     [self _scheduleVisibleContentRectUpdate];
 }
+
+#pragma mark - WKBaseScrollViewDelegate
+
+- (UIAxis)axesToPreventScrollingForPanGestureInScrollView:(WKBaseScrollView *)scrollView
+{
+    auto panGestureRecognizer = scrollView.panGestureRecognizer;
+    if (![_contentView preventsPanningInXAxis] && ![_contentView preventsPanningInYAxis]) {
+        [_contentView cancelPointersForGestureRecognizer:panGestureRecognizer];
+        return UIAxisNeither;
+    }
+
+    UIAxis axesToPrevent = UIAxisNeither;
+    if ([_contentView preventsPanningInXAxis])
+        axesToPrevent |= UIAxisHorizontal;
+    if ([_contentView preventsPanningInYAxis])
+        axesToPrevent |= UIAxisVertical;
+
+    auto translation = [panGestureRecognizer translationInView:scrollView];
+    if ((![_contentView preventsPanningInXAxis] && std::abs(translation.x) > CGFLOAT_EPSILON)
+        || (![_contentView preventsPanningInYAxis] && std::abs(translation.y) > CGFLOAT_EPSILON))
+        [_contentView cancelPointersForGestureRecognizer:panGestureRecognizer];
+
+    return axesToPrevent;
+}
+
 @end
 
 @implementation WKWebView (WKPrivateIOS)
@@ -3538,49 +3554,30 @@ static bool isLockdownModeWarningNeeded()
 // Deprecated SPI.
 - (CGSize)_minimumLayoutSizeOverride
 {
-    ASSERT(_viewLayoutSizeOverride);
-    return _viewLayoutSizeOverride.value_or(CGSizeZero);
-}
+    ASSERT(_overriddenLayoutParameters);
+    if (!_overriddenLayoutParameters)
+        return CGSizeZero;
 
-- (void)_setViewLayoutSizeOverride:(CGSize)viewLayoutSizeOverride
-{
-    _viewLayoutSizeOverride = viewLayoutSizeOverride;
-
-    if (!self._shouldDeferGeometryUpdates)
-        [self _dispatchSetViewLayoutSize:WebCore::FloatSize(viewLayoutSizeOverride)];
+    return _overriddenLayoutParameters->viewLayoutSize;
 }
 
 - (CGSize)_minimumUnobscuredSizeOverride
 {
-    ASSERT(_minimumUnobscuredSizeOverride);
-    return _minimumUnobscuredSizeOverride.value_or(CGSizeZero);
-}
+    ASSERT(_overriddenLayoutParameters);
+    if (!_overriddenLayoutParameters)
+        return CGSizeZero;
 
-- (void)_setMinimumUnobscuredSizeOverride:(CGSize)size
-{
-    ASSERT((!self.bounds.size.width || size.width <= self.bounds.size.width) && (!self.bounds.size.height || size.height <= self.bounds.size.height));
-    _minimumUnobscuredSizeOverride = size;
-
-    if (!self._shouldDeferGeometryUpdates)
-        _page->setMinimumUnobscuredSize(WebCore::FloatSize(size));
+    return _overriddenLayoutParameters->minimumUnobscuredSize;
 }
 
 // Deprecated SPI
 - (CGSize)_maximumUnobscuredSizeOverride
 {
-    ASSERT(_maximumUnobscuredSizeOverride);
-    return _maximumUnobscuredSizeOverride.value_or(CGSizeZero);
-}
+    ASSERT(_overriddenLayoutParameters);
+    if (!_overriddenLayoutParameters)
+        return CGSizeZero;
 
-- (void)_setMaximumUnobscuredSizeOverride:(CGSize)size
-{
-    ASSERT((!self.bounds.size.width || size.width <= self.bounds.size.width) && (!self.bounds.size.height || size.height <= self.bounds.size.height));
-    _maximumUnobscuredSizeOverride = size;
-
-    if (!self._shouldDeferGeometryUpdates) {
-        _page->setDefaultUnobscuredSize(WebCore::FloatSize(size));
-        _page->setMaximumUnobscuredSize(WebCore::FloatSize(size));
-    }
+    return _overriddenLayoutParameters->maximumUnobscuredSize;
 }
 
 - (UIEdgeInsets)_obscuredInsets
@@ -3921,11 +3918,9 @@ static bool isLockdownModeWarningNeeded()
         }
 
         [self _frameOrBoundsMayHaveChanged];
-        if (_viewLayoutSizeOverride)
+        if (_overriddenLayoutParameters) {
             [self _dispatchSetViewLayoutSize:newViewLayoutSize];
-        if (_minimumUnobscuredSizeOverride)
             _page->setMinimumUnobscuredSize(WebCore::FloatSize(newMinimumUnobscuredSize));
-        if (_maximumUnobscuredSizeOverride) {
             _page->setDefaultUnobscuredSize(WebCore::FloatSize(newMaximumUnobscuredSize));
             _page->setMaximumUnobscuredSize(WebCore::FloatSize(newMaximumUnobscuredSize));
         }
@@ -4018,7 +4013,7 @@ static bool isLockdownModeWarningNeeded()
 
 - (void)_endAnimatedResize
 {
-    WKWEBVIEW_RELEASE_LOG("%p (pageProxyID=%llu) -[WKWebView _endAnimatedResize] dynamicViewportUpdateMode %d", self, _page->identifier().toUInt64(), _perProcessState.dynamicViewportUpdateMode);
+    WKWEBVIEW_RELEASE_LOG("%p (pageProxyID=%llu) -[WKWebView _endAnimatedResize] dynamicViewportUpdateMode %d", self, _page->identifier().toUInt64(), enumToUnderlyingType(_perProcessState.dynamicViewportUpdateMode));
 
     // If we already have an up-to-date layer tree, immediately complete
     // the resize. Otherwise, we will defer completion until we do.
@@ -4142,16 +4137,29 @@ static bool isLockdownModeWarningNeeded()
     if (minimumLayoutSize.width < 0 || minimumLayoutSize.height < 0)
         RELEASE_LOG_FAULT(VisibleRects, "%s: Error: attempting to override layout parameters with negative width or height: %@", __PRETTY_FUNCTION__, NSStringFromCGSize(minimumLayoutSize));
 
-    [self _setViewLayoutSizeOverride:CGSizeMake(std::max<CGFloat>(0, minimumLayoutSize.width), std::max<CGFloat>(0, minimumLayoutSize.height))];
-    [self _setMinimumUnobscuredSizeOverride:minimumUnobscuredSizeOverride];
-    [self _setMaximumUnobscuredSizeOverride:maximumUnobscuredSizeOverride];
+    OverriddenLayoutParameters overriddenLayoutParameters;
+
+    overriddenLayoutParameters.viewLayoutSize = CGSizeMake(std::max<CGFloat>(0, minimumLayoutSize.width), std::max<CGFloat>(0, minimumLayoutSize.height));
+
+    ASSERT((!self.bounds.size.width || minimumUnobscuredSizeOverride.width <= self.bounds.size.width) && (!self.bounds.size.height || minimumUnobscuredSizeOverride.height <= self.bounds.size.height));
+    overriddenLayoutParameters.minimumUnobscuredSize = minimumUnobscuredSizeOverride;
+
+    ASSERT((!self.bounds.size.width || maximumUnobscuredSizeOverride.width <= self.bounds.size.width) && (!self.bounds.size.height || maximumUnobscuredSizeOverride.height <= self.bounds.size.height));
+    overriddenLayoutParameters.maximumUnobscuredSize = maximumUnobscuredSizeOverride;
+
+    _overriddenLayoutParameters = overriddenLayoutParameters;
+
+    if (!self._shouldDeferGeometryUpdates) {
+        [self _dispatchSetViewLayoutSize:WebCore::FloatSize(overriddenLayoutParameters.viewLayoutSize)];
+        _page->setMinimumUnobscuredSize(WebCore::FloatSize(overriddenLayoutParameters.minimumUnobscuredSize));
+        _page->setDefaultUnobscuredSize(WebCore::FloatSize(overriddenLayoutParameters.maximumUnobscuredSize));
+        _page->setMaximumUnobscuredSize(WebCore::FloatSize(overriddenLayoutParameters.maximumUnobscuredSize));
+    }
 }
 
 - (void)_clearOverrideLayoutParameters
 {
-    _viewLayoutSizeOverride = std::nullopt;
-    _minimumUnobscuredSizeOverride = std::nullopt;
-    _maximumUnobscuredSizeOverride = std::nullopt;
+    _overriddenLayoutParameters = std::nullopt;
 
     _page->setMinimumUnobscuredSize({ });
     _page->setDefaultUnobscuredSize({ });

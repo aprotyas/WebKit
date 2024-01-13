@@ -39,12 +39,7 @@ public:
         return document;
     }
 
-    static Ref<XMLDocument> createXHTML(LocalFrame* frame, const Settings& settings, const URL& url)
-    {
-        auto document = adoptRef(*new XMLDocument(frame, settings, url, { DocumentClass::XML, DocumentClass::XHTML }));
-        document->addToContextsMap();
-        return document;
-    }
+    WEBCORE_EXPORT static Ref<XMLDocument> createXHTML(LocalFrame*, const Settings&, const URL&);
 
 protected:
     XMLDocument(LocalFrame* frame, const Settings& settings, const URL& url, DocumentClasses documentClasses = { })
@@ -57,5 +52,9 @@ protected:
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::XMLDocument)
     static bool isType(const WebCore::Document& document) { return document.isXMLDocument(); }
-    static bool isType(const WebCore::Node& node) { return is<WebCore::Document>(node) && isType(downcast<WebCore::Document>(node)); }
+    static bool isType(const WebCore::Node& node)
+    {
+        auto* document = dynamicDowncast<WebCore::Document>(node);
+        return document && isType(*document);
+    }
 SPECIALIZE_TYPE_TRAITS_END()

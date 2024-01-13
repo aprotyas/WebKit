@@ -106,9 +106,9 @@ WorkerMessagingProxy::WorkerMessagingProxy(Worker& workerObject)
 
     if (is<Document>(*m_scriptExecutionContext))
         m_loaderContextIdentifier = m_scriptExecutionContext->identifier();
-    else
-        m_loaderContextIdentifier = downcast<WorkerGlobalScope>(*m_scriptExecutionContext).thread().workerLoaderProxy().loaderContextIdentifier();
-
+    else if (auto* workerLoaderProxy = downcast<WorkerGlobalScope>(*m_scriptExecutionContext).thread().workerLoaderProxy())
+        m_loaderContextIdentifier = workerLoaderProxy->loaderContextIdentifier();
+    ASSERT(m_loaderContextIdentifier);
     // Nobody outside this class ref counts this object. The original ref
     // is balanced by the deref in workerGlobalScopeDestroyedInternal.
 }
@@ -119,6 +119,9 @@ WorkerMessagingProxy::~WorkerMessagingProxy()
     ASSERT(!m_scriptExecutionContext
         || (is<Document>(*m_scriptExecutionContext) && isMainThread())
         || (is<WorkerGlobalScope>(*m_scriptExecutionContext) && downcast<WorkerGlobalScope>(*m_scriptExecutionContext).thread().thread() == &Thread::current()));
+
+    if (m_workerThread)
+        m_workerThread->clearProxies();
 }
 
 void WorkerMessagingProxy::startWorkerGlobalScope(const URL& scriptURL, PAL::SessionID sessionID, const String& name, WorkerInitializationData&& initializationData, const ScriptBuffer& sourceCode, const ContentSecurityPolicyResponseHeaders& contentSecurityPolicyResponseHeaders, bool shouldBypassMainWorldContentSecurityPolicy, const CrossOriginEmbedderPolicy& crossOriginEmbedderPolicy, MonotonicTime timeOrigin, ReferrerPolicy referrerPolicy, WorkerType workerType, FetchRequestCredentials credentials, JSC::RuntimeFlags runtimeFlags)
@@ -144,9 +147,7 @@ void WorkerMessagingProxy::startWorkerGlobalScope(const URL& scriptURL, PAL::Ses
     m_scriptURL = scriptURL;
 
     WorkerParameters params { scriptURL, m_scriptExecutionContext->url(), name, identifier, WTFMove(initializationData.userAgent), isOnline, contentSecurityPolicyResponseHeaders, shouldBypassMainWorldContentSecurityPolicy, crossOriginEmbedderPolicy, timeOrigin, referrerPolicy, workerType, credentials, m_scriptExecutionContext->settingsValues(), WorkerThreadMode::CreateNewThread, sessionID,
-#if ENABLE(SERVICE_WORKER)
         WTFMove(initializationData.serviceWorkerData),
-#endif
         initializationData.clientIdentifier.value_or(ScriptExecutionContextIdentifier { }),
         m_scriptExecutionContext->noiseInjectionHashSalt()
     };
@@ -154,8 +155,8 @@ void WorkerMessagingProxy::startWorkerGlobalScope(const URL& scriptURL, PAL::Ses
 
     if (parentWorkerGlobalScope) {
         parentWorkerGlobalScope->thread().addChildThread(thread);
-        if (parentWorkerGlobalScope->thread().workerClient())
-            thread->setWorkerClient(parentWorkerGlobalScope->thread().workerClient()->clone(thread.get()));
+        if (auto* parentWorkerClient = parentWorkerGlobalScope->workerClient())
+            thread->setWorkerClient(parentWorkerClient->createNestedWorkerClient(thread.get()).moveToUniquePtr());
     } else if (is<Document>(m_scriptExecutionContext.get())) {
         auto& document = downcast<Document>(*m_scriptExecutionContext);
         if (auto* page = document.page()) {
@@ -435,7 +436,9 @@ void WorkerMessagingProxy::workerGlobalScopeDestroyedInternal()
     if (auto* workerGlobalScope = dynamicDowncast<WorkerGlobalScope>(m_scriptExecutionContext.get()); workerGlobalScope && m_workerThread)
         workerGlobalScope->thread().removeChildThread(*m_workerThread);
 
-    m_workerThread = nullptr;
+    if (RefPtr workerThread = std::exchange(m_workerThread, nullptr))
+        workerThread->clearProxies();
+
     m_scriptExecutionContext = nullptr;
 
     // This balances the original ref in construction.

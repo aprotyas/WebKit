@@ -30,7 +30,6 @@
 #include "RenderingResourceIdentifier.h"
 #include <variant>
 #include <wtf/BitVector.h>
-#include <wtf/CheckedRef.h>
 #include <wtf/Hasher.h>
 #include <wtf/WeakPtr.h>
 #include <wtf/text/StringHash.h>
@@ -65,8 +64,8 @@ class GlyphPage;
 
 struct GlyphData;
 
-enum FontVariant { AutoVariant, NormalVariant, SmallCapsVariant, EmphasisMarkVariant, BrokenIdeographVariant };
-enum Pitch { UnknownPitch, FixedPitch, VariablePitch };
+enum FontVariant : uint8_t { AutoVariant, NormalVariant, SmallCapsVariant, EmphasisMarkVariant, BrokenIdeographVariant };
+enum Pitch : uint8_t { UnknownPitch, FixedPitch, VariablePitch };
 enum class IsForPlatformFont : bool { No, Yes };
 
 // Used to create platform fonts.
@@ -80,8 +79,18 @@ bool fontHasTable(CTFontRef, unsigned tableTag);
 bool fontHasEitherTable(CTFontRef, unsigned tableTag1, unsigned tableTag2);
 #endif
 
+struct FontInternalAttributes {
+    WEBCORE_EXPORT RenderingResourceIdentifier ensureRenderingResourceIdentifier() const;
+
+    mutable std::optional<RenderingResourceIdentifier> renderingResourceIdentifier;
+    FontOrigin origin : 1;
+    FontIsInterstitial isInterstitial : 1;
+    FontVisibility visibility : 1;
+    FontIsOrientationFallback isTextOrientationFallback : 1;
+};
+
 DECLARE_ALLOCATOR_WITH_HEAP_IDENTIFIER(Font);
-class Font : public RefCounted<Font>, public CanMakeWeakPtr<Font>, public CanMakeCheckedPtr {
+class Font : public RefCounted<Font>, public CanMakeSingleThreadWeakPtr<Font> {
     WTF_MAKE_FAST_ALLOCATED_WITH_HEAP_IDENTIFIER(Font);
 public:
     using Origin = FontOrigin;
@@ -170,10 +179,10 @@ public:
     Glyph zeroWidthSpaceGlyph() const { return m_zeroWidthSpaceGlyph; }
     bool isZeroWidthSpaceGlyph(Glyph glyph) const { return glyph == m_zeroWidthSpaceGlyph && glyph; }
 
-    GlyphData glyphDataForCharacter(UChar32) const;
-    Glyph glyphForCharacter(UChar32) const;
-    bool supportsCodePoint(UChar32) const;
-    bool platformSupportsCodePoint(UChar32, std::optional<UChar32> variation = std::nullopt) const;
+    GlyphData glyphDataForCharacter(char32_t) const;
+    Glyph glyphForCharacter(char32_t) const;
+    bool supportsCodePoint(char32_t) const;
+    bool platformSupportsCodePoint(char32_t, std::optional<char32_t> variation = std::nullopt) const;
 
     RefPtr<Font> systemFallbackFontForCharacterCluster(StringView, const FontDescription&, ResolvedEmojiPolicy, IsForPlatformFont) const;
 
@@ -181,6 +190,7 @@ public:
 
     void determinePitch();
     Pitch pitch() const { return m_treatAsFixedPitch ? FixedPitch : VariablePitch; }
+    bool canTakeFixedPitchFastContentMeasuring() const { return m_canTakeFixedPitchFastContentMeasuring; }
 
     Origin origin() const { return m_attributes.origin; }
     bool isInterstitial() const { return m_attributes.isInterstitial == IsInterstitial::Yes; }
@@ -218,16 +228,7 @@ public:
     void setIsUsedInSystemFallbackFontCache() { m_isUsedInSystemFallbackFontCache = true; }
     bool isUsedInSystemFallbackFontCache() const { return m_isUsedInSystemFallbackFontCache; }
 
-    class Attributes {
-    public:
-        WEBCORE_EXPORT RenderingResourceIdentifier ensureRenderingResourceIdentifier() const;
-
-        mutable std::optional<RenderingResourceIdentifier> renderingResourceIdentifier;
-        Font::Origin origin : 1;
-        Font::IsInterstitial isInterstitial : 1;
-        Font::Visibility visibility : 1;
-        Font::IsOrientationFallback isTextOrientationFallback : 1;
-    };
+    using Attributes = FontInternalAttributes;
     const Attributes& attributes() const { return m_attributes; }
 
     ColorGlyphType colorGlyphType(Glyph) const;
@@ -356,6 +357,7 @@ private:
     float m_syntheticBoldOffset { 0 };
 
     unsigned m_treatAsFixedPitch : 1;
+    unsigned m_canTakeFixedPitchFastContentMeasuring : 1 { false };
     unsigned m_isBrokenIdeographFallback : 1;
     unsigned m_hasVerticalGlyphs : 1;
 

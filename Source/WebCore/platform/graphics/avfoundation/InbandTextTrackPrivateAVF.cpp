@@ -304,6 +304,28 @@ Ref<InbandGenericCue> InbandTextTrackPrivateAVF::processCueAttributes(CFAttribut
         content.append(tagEnd);
     }
 
+    // AVFoundation cue "position" is to the center of the text so calculate the correct position and positionAlign
+    // relative to the cue's indicated alignment, size, and initial position.
+    if (cueData->position() >= 0 && cueData->size() >= 0) {
+        switch (cueData->align()) {
+        case GenericCueData::Alignment::None:
+            // By default, VTT cues alignment align as "start"
+            FALLTHROUGH;
+        case GenericCueData::Alignment::Middle:
+            // AVFoundation generates "middle" alignment cues for single line cues
+            // and cues multi-line cues with lines of equal length, so just treat
+            // "middle" alignment the same as "start"
+            FALLTHROUGH;
+        case GenericCueData::Alignment::Start:
+            cueData->setPositionAlign(GenericCueData::Alignment::Start);
+            cueData->setPosition(cueData->position() - cueData->size() / 2);
+            break;
+        case GenericCueData::Alignment::End:
+            cueData->setPositionAlign(GenericCueData::Alignment::End);
+            cueData->setPosition(cueData->position() + cueData->size() / 2);
+        }
+    }
+
     if (content.length())
         cueData->setContent(content.toString());
 
@@ -340,12 +362,6 @@ void InbandTextTrackPrivateAVF::processAttributedStrings(CFArrayRef attributedSt
 
             cueData->setStartTime(time);
             cueData->setEndTime(MediaTime::positiveInfiniteTime());
-
-            // AVFoundation cue "position" is to the center of the text so adjust relative to the edge because we will use it to
-            // set CSS "left".
-            if (cueData->position() >= 0 && cueData->size() > 0)
-                cueData->setPosition(cueData->position() - cueData->size() / 2);
-
             cueData->setStatus(GenericCueData::Status::Partial);
 
             arrivingCues.append(WTFMove(cueData));

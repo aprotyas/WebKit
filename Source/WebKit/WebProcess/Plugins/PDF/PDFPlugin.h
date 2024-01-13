@@ -55,11 +55,6 @@ OBJC_CLASS PDFSelection;
 OBJC_CLASS WKPDFLayerControllerDelegate;
 OBJC_CLASS WKPDFPluginAccessibilityObject;
 
-typedef const struct OpaqueJSContext* JSContextRef;
-typedef struct OpaqueJSValue* JSObjectRef;
-typedef const struct OpaqueJSValue* JSValueRef;
-typedef struct OpaqueJSClass* JSClassRef;
-
 namespace WebCore {
 class AXObjectCache;
 class Element;
@@ -137,6 +132,12 @@ public:
     size_t decrementThreadsWaitingOnCallback() { return --m_threadsWaitingOnCallback; }
 #endif
 
+    WebCore::IntPoint convertFromPluginToPDFView(const WebCore::IntPoint&) const;
+    WebCore::IntPoint convertFromPDFViewToRootView(const WebCore::IntPoint&) const;
+    WebCore::IntRect convertFromPDFViewToRootView(const WebCore::IntRect&) const;
+    WebCore::IntPoint convertFromRootViewToPDFView(const WebCore::IntPoint&) const;
+    WebCore::FloatRect convertFromPDFViewToScreen(const WebCore::FloatRect&) const;
+
 private:
     explicit PDFPlugin(WebCore::HTMLPlugInElement&);
     bool isLegacyPDFPlugin() const override { return true; }
@@ -148,8 +149,7 @@ private:
     void invalidateScrollbarRect(WebCore::Scrollbar&, const WebCore::IntRect&) override;
     void invalidateScrollCornerRect(const WebCore::IntRect&) override;
     void updateScrollbars() override;
-    WebCore::IntPoint lastKnownMousePositionInView() const override { return m_lastMousePositionInPluginCoordinates; }
-    Ref<Scrollbar> createScrollbar(WebCore::ScrollbarOrientation) override;
+    Ref<WebCore::Scrollbar> createScrollbar(WebCore::ScrollbarOrientation) override;
     void destroyScrollbar(WebCore::ScrollbarOrientation) override;
 
     // PDFPluginBase
@@ -161,7 +161,6 @@ private:
     bool isComposited() const override { return true; }
 
     void installPDFDocument() override;
-    void tryRunScriptsInPDFDocument() override;
 
     CGFloat scaleFactor() const override;
 
@@ -169,21 +168,24 @@ private:
     WebCore::FloatSize pdfDocumentSizeForPrinting() const override;
 
     void geometryDidChange(const WebCore::IntSize& pluginSize, const WebCore::AffineTransform& pluginToRootViewTransform) override;
-    void contentsScaleFactorChanged(float) override;
+    void deviceScaleFactorChanged(float) override;
+
+    void setPageScaleFactor(double, std::optional<WebCore::IntPoint> origin) override;
 
     WebCore::IntSize contentsSize() const override;
     unsigned firstPageHeight() const override;
 
     RefPtr<WebCore::FragmentedSharedBuffer> liveResourceData() const override;
 
+    bool wantsWheelEvents() const override { return true; }
     bool handleMouseEvent(const WebMouseEvent&) override;
     bool handleWheelEvent(const WebWheelEvent&) override;
     bool handleMouseEnterEvent(const WebMouseEvent&) override;
     bool handleMouseLeaveEvent(const WebMouseEvent&) override;
     bool handleContextMenuEvent(const WebMouseEvent&) override;
     bool handleKeyboardEvent(const WebKeyboardEvent&) override;
-    bool handleEditingCommand(StringView commandName) override;
-    bool isEditingCommandEnabled(StringView commandName) override;
+    bool handleEditingCommand(const String& commandName, const String& argument) override;
+    bool isEditingCommandEnabled(const String& commandName) override;
 
     String getSelectionString() const override;
     bool existingSelectionContainsPoint(const WebCore::FloatPoint&) const override;
@@ -195,6 +197,7 @@ private:
     bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&) override;
     std::tuple<String, PDFSelection *, NSDictionary *> lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) const override;
 
+    bool shouldCreateTransientPaintingSnapshot() const override { return true; }
     RefPtr<ShareableBitmap> snapshot() override;
 
     id accessibilityHitTest(const WebCore::IntPoint&) const override;
@@ -209,16 +212,11 @@ private:
 
     bool supportsForms();
 
-    bool handlesPageScaleFactor() const;
     void updatePageAndDeviceScaleFactors();
 
     void createPasswordEntryForm();
 
     NSData *liveData() const;
-    JSObjectRef makeJSPDFDoc(JSContextRef);
-    static JSClassRef jsPDFDocClass();
-    static JSValueRef jsPDFDocPrint(JSContextRef, JSObjectRef function, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception);
-
 
     bool m_pdfDocumentWasMutated { false };
 
@@ -235,7 +233,6 @@ private:
     RefPtr<WebCore::Element> m_annotationContainer;
 
     std::optional<WebMouseEvent> m_lastMouseEvent;
-    WebCore::IntPoint m_lastMousePositionInPluginCoordinates;
 
     String m_temporaryPDFUUID;
     String m_lastFoundString;

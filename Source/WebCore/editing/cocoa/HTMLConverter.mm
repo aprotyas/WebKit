@@ -65,6 +65,7 @@
 #import "StyledElement.h"
 #import "TextIterator.h"
 #import "VisibleSelection.h"
+#import "WebCoreTextAttachment.h"
 #import "markup.h"
 #import <objc/runtime.h>
 #import <pal/spi/cocoa/NSAttributedStringSPI.h>
@@ -109,14 +110,6 @@ enum {
 #else
 static RetainPtr<NSFileWrapper> fileWrapperForURL(DocumentLoader *, NSURL *);
 static RetainPtr<NSFileWrapper> fileWrapperForElement(HTMLImageElement&);
-
-@interface NSTextAttachment (WebCoreNSTextAttachment)
-- (void)setIgnoresOrientation:(BOOL)flag;
-- (void)setBounds:(CGRect)bounds;
-- (BOOL)ignoresOrientation;
-@property (strong) NSString *accessibilityLabel;
-@end
-
 #endif
 
 // Additional control Unicode characters
@@ -811,7 +804,10 @@ static PlatformFont *_font(Element& element)
     auto* renderer = element.renderer();
     if (!renderer)
         return nil;
-    return (__bridge PlatformFont *)renderer->style().fontCascade().primaryFont().getCTFont();
+    Ref primaryFont = renderer->style().fontCascade().primaryFont();
+    if (primaryFont->attributes().origin == FontOrigin::Remote)
+        return [PlatformFontClass systemFontOfSize:defaultFontSize];
+    return (__bridge PlatformFont *)primaryFont->getCTFont();
 }
 
 NSDictionary *HTMLConverter::computedAttributesForElement(Element& element)
@@ -1224,15 +1220,8 @@ BOOL HTMLConverter::_addAttachmentForElement(Element& element, NSURL *url, BOOL 
                 [attachment setIgnoresOrientation:YES];
 #endif
         } else {
-            NSBundle *webCoreBundle = [NSBundle bundleWithIdentifier:@"com.apple.WebCore"];
-#if PLATFORM(IOS_FAMILY)
-            UIImage *missingImage = [PlatformImageClass imageNamed:@"missingImage" inBundle:webCoreBundle compatibleWithTraitCollection:nil];
-#else
-            NSImage *missingImage = [webCoreBundle imageForResource:@"missingImage"];
-#endif
-            ASSERT_WITH_MESSAGE(missingImage != nil, "Unable to find missingImage.");
             attachment = adoptNS([[PlatformNSTextAttachment alloc] initWithData:nil ofType:nil]);
-            attachment.get().image = missingImage;
+            attachment.get().image = webCoreTextAttachmentMissingPlatformImage();
         }
         [_attrStr replaceCharactersInRange:rangeToReplace withString:string.get()];
         rangeToReplace.length = [string length];

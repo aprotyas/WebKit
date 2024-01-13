@@ -26,6 +26,8 @@
 #include "config.h"
 #include "NetworkStorageManager.h"
 
+#include "BackgroundFetchChange.h"
+#include "BackgroundFetchStoreManager.h"
 #include "CacheStorageCache.h"
 #include "CacheStorageManager.h"
 #include "CacheStorageRegistry.h"
@@ -41,6 +43,7 @@
 #include "NetworkStorageManagerMessages.h"
 #include "OriginQuotaManager.h"
 #include "OriginStorageManager.h"
+#include "ServiceWorkerStorageManager.h"
 #include "SessionStorageManager.h"
 #include "StorageAreaBase.h"
 #include "StorageAreaMapMessages.h"
@@ -48,19 +51,13 @@
 #include "UnifiedOriginStorageLevel.h"
 #include "WebsiteDataType.h"
 #include <WebCore/SecurityOriginData.h>
+#include <WebCore/ServiceWorkerContextData.h>
 #include <WebCore/StorageUtilities.h>
 #include <WebCore/UniqueIDBDatabaseConnection.h>
 #include <WebCore/UniqueIDBDatabaseTransaction.h>
 #include <pal/crypto/CryptoDigest.h>
 #include <wtf/SuspendableWorkQueue.h>
 #include <wtf/text/Base64.h>
-
-#if ENABLE(SERVICE_WORKER)
-#include "BackgroundFetchChange.h"
-#include "BackgroundFetchStoreManager.h"
-#include "ServiceWorkerStorageManager.h"
-#include <WebCore/ServiceWorkerContextData.h>
-#endif
 
 namespace WebKit {
 
@@ -203,12 +200,10 @@ NetworkStorageManager::NetworkStorageManager(NetworkProcess& process, PAL::Sessi
             auto saltPath = FileSystem::pathByAppendingComponent(m_path, "salt"_s);
             m_salt = valueOrDefault(FileSystem::readOrMakeSalt(saltPath));
         }
-#if ENABLE(SERVICE_WORKER)
         if (shouldManageServiceWorkerRegistrationsByOrigin())
             migrateServiceWorkerRegistrationsToOrigins();
         else
             m_sharedServiceWorkerStorageManager = makeUnique<ServiceWorkerStorageManager>(m_customServiceWorkerStoragePath);
-#endif
 #if PLATFORM(IOS_FAMILY)
         // Exclude LocalStorage directory to reduce backup traffic. See https://webkit.org/b/168388.
         if (m_unifiedOriginStorageLevel == UnifiedOriginStorageLevel::None  && !m_customLocalStoragePath.isEmpty()) {
@@ -240,9 +235,7 @@ OptionSet<WebsiteDataType> NetworkStorageManager::allManagedTypes()
         WebsiteDataType::FileSystem,
         WebsiteDataType::IndexedDBDatabases,
         WebsiteDataType::DOMCache,
-#if ENABLE(SERVICE_WORKER)
         WebsiteDataType::ServiceWorkerRegistrations
-#endif
     };
 }
 
@@ -263,9 +256,7 @@ void NetworkStorageManager::close(CompletionHandler<void()>&& completionHandler)
         m_fileSystemStorageHandleRegistry = nullptr;
         for (auto&& completionHandler : std::exchange(m_persistCompletionHandlers, { }))
             completionHandler.second(false);
-#if ENABLE(SERVICE_WORKER)
         m_sharedServiceWorkerStorageManager = nullptr;
-#endif
 
         RunLoop::main().dispatch([protectedThis = WTFMove(protectedThis), completionHandler = WTFMove(completionHandler)]() mutable {
             completionHandler();
@@ -303,6 +294,8 @@ void NetworkStorageManager::stopReceivingMessageFromConnection(IPC::Connection& 
             return shouldRemove;
         });
         m_temporaryBlobPathsByConnection.remove(connection);
+
+        RunLoop::main().dispatch([protectedThis = WTFMove(protectedThis)] { });
     });
 }
 
@@ -384,7 +377,7 @@ void NetworkStorageManager::spaceGrantedForOrigin(const WebCore::ClientOrigin& o
     if (m_totalUsage)
         m_totalUsage = *m_totalUsage + amount;
 
-    if (!m_totalUsage || *m_totalUsage > m_totalQuota)
+    if (!m_totalUsage || *m_totalUsage > *m_totalQuota)
         schedulePerformEviction();
 }
 
@@ -491,7 +484,8 @@ void NetworkStorageManager::performEviction(HashMap<WebCore::SecurityOriginData,
     assertIsCurrent(workQueue());
 
     m_isEvictionScheduled = false;
-    if (!m_totalQuota || !m_totalUsage || *m_totalUsage <= m_totalQuota)
+    ASSERT(m_totalQuota);
+    if (!m_totalUsage || *m_totalUsage <= *m_totalQuota)
         return;
 
     Vector<std::pair<WebCore::SecurityOriginData, AccessRecord>> sortedOriginRecords;
@@ -503,7 +497,7 @@ void NetworkStorageManager::performEviction(HashMap<WebCore::SecurityOriginData,
     });
 
     uint64_t deletedOriginCount = 0;
-    while (!sortedOriginRecords.isEmpty() && *m_totalUsage > m_totalQuota) {
+    while (!sortedOriginRecords.isEmpty() && *m_totalUsage > *m_totalQuota) {
         auto [topOrigin, record] = sortedOriginRecords.takeLast();
         if (record.isActive || valueOrDefault(record.isPersisted))
             continue;
@@ -519,7 +513,7 @@ void NetworkStorageManager::performEviction(HashMap<WebCore::SecurityOriginData,
     }
 
     UNUSED_PARAM(deletedOriginCount);
-    RELEASE_LOG(Storage, "%p - NetworkStorageManager::performEviction evicts %" PRIu64 " origins, current usage %" PRIu64 ", total quota %" PRIu64, this, deletedOriginCount, valueOrDefault(m_totalUsage), m_totalQuota);
+    RELEASE_LOG(Storage, "%p - NetworkStorageManager::performEviction evicts %" PRIu64 " origins, current usage %" PRIu64 ", total quota %" PRIu64, this, deletedOriginCount, valueOrDefault(m_totalUsage), *m_totalQuota);
 }
 
 OriginQuotaManager::Parameters NetworkStorageManager::originQuotaManagerParameters(const WebCore::ClientOrigin& origin)
@@ -1680,7 +1674,8 @@ void NetworkStorageManager::lockCacheStorage(IPC::Connection& connection, const 
 
 void NetworkStorageManager::unlockCacheStorage(IPC::Connection& connection, const WebCore::ClientOrigin& origin)
 {
-    originStorageManager(origin).cacheStorageManager(*m_cacheStorageRegistry, origin, m_queue.copyRef()).unlockStorage(connection.uniqueID());
+    if (auto cacheStorageManager = originStorageManager(origin).existingCacheStorageManager())
+        cacheStorageManager->unlockStorage(connection.uniqueID());
 }
 
 void NetworkStorageManager::cacheStorageRetrieveRecords(WebCore::DOMCacheIdentifier cacheIdentifier, WebCore::RetrieveRecordsOptions&& options, WebCore::DOMCacheEngine::CrossThreadRecordsCallback&& callback)
@@ -1751,8 +1746,6 @@ void NetworkStorageManager::cacheStorageRepresentation(CompletionHandler<void(St
     builder.append("]}");
     callback(builder.toString());
 }
-
-#if ENABLE(SERVICE_WORKER)
 
 void NetworkStorageManager::dispatchTaskToBackgroundFetchManager(const WebCore::ClientOrigin& origin, Function<void(BackgroundFetchStoreManager*)>&& callback)
 {
@@ -1927,7 +1920,5 @@ bool NetworkStorageManager::shouldManageServiceWorkerRegistrationsByOrigin()
 
     return m_unifiedOriginStorageLevel >= UnifiedOriginStorageLevel::Standard;
 }
-
-#endif // ENABLE(SERVICE_WORKER)
 
 } // namespace WebKit

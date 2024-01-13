@@ -91,14 +91,14 @@ static inline void updateLogicalHeightForCell(RenderTableSection::RowStruct& row
 }
 
 RenderTableSection::RenderTableSection(Element& element, RenderStyle&& style)
-    : RenderBox(Type::TableSection, element, WTFMove(style), 0)
+    : RenderBox(Type::TableSection, element, WTFMove(style))
 {
     setInline(false);
     ASSERT(isRenderTableSection());
 }
 
 RenderTableSection::RenderTableSection(Document& document, RenderStyle&& style)
-    : RenderBox(Type::TableSection, document, WTFMove(style), 0)
+    : RenderBox(Type::TableSection, document, WTFMove(style))
 {
     setInline(false);
     ASSERT(isRenderTableSection());
@@ -506,11 +506,12 @@ void RenderTableSection::relayoutCellIfFlexed(RenderTableCell& cell, int rowInde
     bool flexAllChildren = cell.style().logicalHeight().isFixed() || (!table()->style().logicalHeight().isAuto() && rowHeight != cell.logicalHeight());
     
     for (auto& renderer : childrenOfType<RenderBox>(cell)) {
-        if (renderer.style().logicalHeight().isPercentOrCalculated()
-            && (flexAllChildren || shouldFlexCellChild(cell, renderer))
-            && (!is<RenderTable>(renderer) || downcast<RenderTable>(renderer).hasSections())) {
-            cellChildrenFlex = true;
-            break;
+        if (renderer.style().logicalHeight().isPercentOrCalculated() && (flexAllChildren || shouldFlexCellChild(cell, renderer))) {
+            auto* renderTable = dynamicDowncast<RenderTable>(renderer);
+            if (!renderTable || renderTable->hasSections()) {
+                cellChildrenFlex = true;
+                break;
+            }
         }
     }
 
@@ -946,14 +947,14 @@ void RenderTableSection::paint(PaintInfo& paintInfo, const LayoutPoint& paintOff
         paintOutline(paintInfo, LayoutRect(adjustedPaintOffset, size()));
 }
 
-static inline bool compareCellPositions(const WeakPtr<RenderTableCell>& elem1, const WeakPtr<RenderTableCell>& elem2)
+static inline bool compareCellPositions(const SingleThreadWeakPtr<RenderTableCell>& elem1, const SingleThreadWeakPtr<RenderTableCell>& elem2)
 {
     return elem1->rowIndex() < elem2->rowIndex();
 }
 
 // This comparison is used only when we have overflowing cells as we have an unsorted array to sort. We thus need
 // to sort both on rows and columns to properly repaint.
-static inline bool compareCellPositionsWithOverflowingCells(const WeakPtr<RenderTableCell>& elem1, const WeakPtr<RenderTableCell>& elem2)
+static inline bool compareCellPositionsWithOverflowingCells(const SingleThreadWeakPtr<RenderTableCell>& elem1, const SingleThreadWeakPtr<RenderTableCell>& elem2)
 {
     if (elem1->rowIndex() != elem2->rowIndex())
         return elem1->rowIndex() < elem2->rowIndex();
@@ -1374,7 +1375,7 @@ void RenderTableSection::removeRedundantColumns()
     for (auto& rowItem : m_grid) {
         if (rowItem.row.size() <= maximumNumberOfColumns)
             continue;
-        rowItem.row.resize(maximumNumberOfColumns);
+        rowItem.row.shrink(maximumNumberOfColumns);
     }
 }
 

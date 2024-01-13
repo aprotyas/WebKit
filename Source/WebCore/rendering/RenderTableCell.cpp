@@ -111,11 +111,12 @@ void RenderTableCell::willBeRemovedFromTree(IsInternalMove isInternalMove)
 unsigned RenderTableCell::parseColSpanFromDOM() const
 {
     ASSERT(element());
-    if (is<HTMLTableCellElement>(*element()))
-        return std::min<unsigned>(downcast<HTMLTableCellElement>(*element()).colSpan(), maxColumnIndex);
+    if (auto* cell = dynamicDowncast<HTMLTableCellElement>(*element()))
+        return std::min<unsigned>(cell->colSpan(), maxColumnIndex);
 #if ENABLE(MATHML)
-    if (element()->hasTagName(MathMLNames::mtdTag))
-        return std::min<unsigned>(downcast<MathMLElement>(*element()).colSpan(), maxColumnIndex);
+    auto* mathMLElement = dynamicDowncast<MathMLElement>(*element());
+    if (mathMLElement && mathMLElement->hasTagName(MathMLNames::mtdTag))
+        return std::min<unsigned>(mathMLElement->colSpan(), maxColumnIndex);
 #endif
     return 1;
 }
@@ -123,11 +124,12 @@ unsigned RenderTableCell::parseColSpanFromDOM() const
 unsigned RenderTableCell::parseRowSpanFromDOM() const
 {
     ASSERT(element());
-    if (is<HTMLTableCellElement>(*element()))
-        return std::min<unsigned>(downcast<HTMLTableCellElement>(*element()).rowSpan(), maxRowIndex);
+    if (auto* cell = dynamicDowncast<HTMLTableCellElement>(*element()))
+        return std::min<unsigned>(cell->rowSpan(), maxRowIndex);
 #if ENABLE(MATHML)
-    if (element()->hasTagName(MathMLNames::mtdTag))
-        return std::min<unsigned>(downcast<MathMLElement>(*element()).rowSpan(), maxRowIndex);
+    auto* mathMLElement = dynamicDowncast<MathMLElement>(*element());
+    if (mathMLElement && mathMLElement->hasTagName(MathMLNames::mtdTag))
+        return std::min<unsigned>(mathMLElement->rowSpan(), maxRowIndex);
 #endif
     return 1;
 }
@@ -230,7 +232,19 @@ void RenderTableCell::computeIntrinsicPadding(LayoutUnit rowHeight)
     LayoutUnit logicalHeightWithoutIntrinsicPadding = logicalHeight() - oldIntrinsicPaddingBefore - oldIntrinsicPaddingAfter;
 
     auto intrinsicPaddingBefore = oldIntrinsicPaddingBefore;
-    switch (style().verticalAlign()) {
+    VerticalAlign alignment = style().verticalAlign();
+    if (auto alignContent = style().alignContent(); !alignContent.isNormal()) {
+        // align-content overrides vertical-align
+        if (alignContent.position() == ContentPosition::Baseline)
+            alignment = VerticalAlign::Baseline;
+        else if (alignContent.isCentered())
+            alignment = VerticalAlign::Middle;
+        else if (alignContent.isStartward())
+            alignment = VerticalAlign::Top;
+        else if (alignContent.isEndward())
+            alignment = VerticalAlign::Bottom;
+    }
+    switch (alignment) {
     case VerticalAlign::Sub:
     case VerticalAlign::Super:
     case VerticalAlign::TextTop:
@@ -366,14 +380,14 @@ LayoutSize RenderTableCell::offsetFromContainer(RenderElement& container, const 
     return offset;
 }
 
-LayoutRect RenderTableCell::clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext context) const
+auto RenderTableCell::localRectsForRepaint(RepaintOutlineBounds repaintOutlineBounds) const -> RepaintRects
 {
     // If the table grid is dirty, we cannot get reliable information about adjoining cells,
     // so we ignore outside borders. This should not be a problem because it means that
     // the table is going to recalculate the grid, relayout and repaint its current rect, which
     // includes any outside borders of this cell.
     if (!table()->collapseBorders() || table()->needsSectionRecalc())
-        return RenderBlockFlow::clippedOverflowRect(repaintContainer, context);
+        return RenderBlockFlow::localRectsForRepaint(repaintOutlineBounds);
 
     bool rtl = !styleForCellFlow().isLeftToRightDirection();
     LayoutUnit outlineSize { style().outlineSize() };
@@ -405,23 +419,31 @@ LayoutRect RenderTableCell::clippedOverflowRect(const RenderLayerModelObject* re
             right = std::max(right, below->borderHalfRight(true));
         }
     }
+
     LayoutPoint location(std::max<LayoutUnit>(left, -visualOverflowRect().x()), std::max<LayoutUnit>(top, -visualOverflowRect().y()));
-    LayoutRect r(-location.x(), -location.y(), location.x() + std::max(width() + right, visualOverflowRect().maxX()), location.y() + std::max(height() + bottom, visualOverflowRect().maxY()));
+    auto overflowRect = LayoutRect(-location.x(), -location.y(), location.x() + std::max(width() + right, visualOverflowRect().maxX()), location.y() + std::max(height() + bottom, visualOverflowRect().maxY()));
 
     // FIXME: layoutDelta needs to be applied in parts before/after transforms and
     // repaint containers. https://bugs.webkit.org/show_bug.cgi?id=23308
-    r.move(view().frameView().layoutContext().layoutDelta());
-    return computeRect(r, repaintContainer, context);
+    overflowRect.move(view().frameView().layoutContext().layoutDelta());
+
+    auto rects = RepaintRects { overflowRect };
+    if (repaintOutlineBounds == RepaintOutlineBounds::Yes)
+        rects.outlineBoundsRect = localOutlineBoundsRepaintRect();
+
+    return rects;
 }
 
-std::optional<LayoutRect> RenderTableCell::computeVisibleRectInContainer(const LayoutRect& rect, const RenderLayerModelObject* container, VisibleRectContext context) const
+auto RenderTableCell::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
 {
     if (container == this)
-        return rect;
-    LayoutRect adjustedRect = rect;
+        return rects;
+
+    auto adjustedRects = rects;
     if ((!view().frameView().layoutContext().isPaintOffsetCacheEnabled() || container || context.options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection)) && parent())
-        adjustedRect.moveBy(-parentBox()->location()); // Rows are in the same coordinate space, so don't add their offset in.
-    return RenderBlockFlow::computeVisibleRectInContainer(adjustedRect, container, context);
+        adjustedRects.moveBy(-parentBox()->location()); // Rows are in the same coordinate space, so don't add their offset in.
+
+    return RenderBlockFlow::computeVisibleRectsInContainer(adjustedRects, container, context);
 }
 
 LayoutUnit RenderTableCell::cellBaselinePosition() const
@@ -452,7 +474,7 @@ void RenderTableCell::styleDidChange(StyleDifference diff, const RenderStyle* ol
 
     // Our intrinsic padding pushes us down to align with the baseline of other cells on the row. If our vertical-align
     // has changed then so will the padding needed to align with other cells - clear it so we can recalculate it from scratch.
-    if (oldStyle && style().verticalAlign() != oldStyle->verticalAlign())
+    if (oldStyle && (style().verticalAlign() != oldStyle->verticalAlign() || style().alignContent() != oldStyle->alignContent()))
         clearIntrinsicPadding();
 
     // If border was changed, notify table.
@@ -1379,7 +1401,8 @@ void RenderTableCell::scrollbarsChanged(bool horizontalScrollbarChanged, bool ve
         return;
 
     // Shrink our intrinsic padding as much as possible to accommodate the scrollbar.
-    if (style().verticalAlign() == VerticalAlign::Middle) {
+    if ((style().verticalAlign() == VerticalAlign::Middle && style().alignContent().isNormal())
+        || style().alignContent().isCentered()) {
         LayoutUnit totalHeight = logicalHeight();
         LayoutUnit heightWithoutIntrinsicPadding = totalHeight - intrinsicPaddingBefore() - intrinsicPaddingAfter();
         totalHeight -= scrollbarHeight;

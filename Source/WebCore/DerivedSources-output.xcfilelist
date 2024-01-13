@@ -10,6 +10,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSPropertyNames.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSPropertyNames.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSPropertyParsing.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSPropertyParsing.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSSelectorEnums.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSSelectorInlines.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSStyleDeclaration+PropertyNames.idl
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSValueKeywords.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/CSSValueKeywords.h
@@ -33,6 +35,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/ElementName.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventFactory.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventHeaders.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventInterfaces.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventNames.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventNames.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventTargetFactory.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventTargetHeaders.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/EventTargetInterfaces.h
@@ -639,6 +643,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCountQueuingStrategy.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCountQueuingStrategy.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialCreationOptions.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialCreationOptions.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialMediationRequirement.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialMediationRequirement.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialRequestOptions.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialRequestOptions.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCredentialsContainer.cpp
@@ -675,6 +681,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomElementRegistry.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomElementRegistry.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomEvent.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomEvent.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomStateSet.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomStateSet.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomXPathNSResolver.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSCustomXPathNSResolver.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDOMApplicationCache.cpp
@@ -847,6 +855,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+StorageAccess.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+StorageAccess.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+UndoMananger.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+UndoMananger.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+ViewTransition.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+ViewTransition.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+WebAnimations.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument+WebAnimations.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSDocument.cpp
@@ -1681,6 +1691,10 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSIntersectionObserverCallback.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSIntersectionObserverCallback.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSIntersectionObserverEntry.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSIntersectionObserverEntry.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSInvokeEvent.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSInvokeEvent.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSInvokerElement.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSInvokerElement.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSIterationCompositeOperation.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSIterationCompositeOperation.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSJsonWebKey.cpp
@@ -2980,6 +2994,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrack.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrack.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackConfiguration.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackConfiguration.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackGenerator.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackGenerator.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackList.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackList.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVideoTrackMediaSource.cpp
@@ -2990,6 +3006,10 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTimeline.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTimeline.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTimelineOptions.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTimelineOptions.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTransition.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTransition.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTransitionUpdateCallback.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSViewTransitionUpdateCallback.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVisibilityState.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVisibilityState.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/JSVisualViewport.cpp
@@ -3418,7 +3438,7 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/SVGElementTypeHelpers.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/SVGNames.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/SVGNames.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/SelectorPseudoClassAndCompatibilityElementMap.cpp
-$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/SelectorPseudoElementTypeMap.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/SelectorPseudoElementMap.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/ServiceWorkerGlobalScopeConstructors.idl
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/Settings.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/Settings.h
@@ -3442,6 +3462,8 @@ $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/TransformStreamDefaultControllerBui
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/TransformStreamDefaultControllerBuiltins.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/TransformStreamInternalsBuiltins.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/TransformStreamInternalsBuiltins.h
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/UserAgentParts.cpp
+$(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/UserAgentParts.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/UserAgentScripts.h
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/UserAgentScriptsData.cpp
 $(BUILT_PRODUCTS_DIR)/DerivedSources/WebCore/UserAgentStyleSheets.h

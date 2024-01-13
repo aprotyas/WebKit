@@ -34,6 +34,8 @@
 #include <WebCore/ProcessIdentifier.h>
 #include <memory>
 #include <wtf/CheckedRef.h>
+#include <wtf/Forward.h>
+#include <wtf/HashMap.h>
 #include <wtf/ProcessID.h>
 #include <wtf/SystemTracing.h>
 #include <wtf/ThreadSafeRefCounted.h>
@@ -45,24 +47,32 @@ class SharedBuffer;
 
 namespace WebKit {
 
+class ExtensionCapabilityGrant;
 class ProcessThrottler;
 class ProcessAssertion;
 class SandboxExtensionHandle;
 
 struct AuxiliaryProcessCreationParameters;
 
+using ExtensionCapabilityGrantMap = HashMap<String, ExtensionCapabilityGrant>;
+
 class AuxiliaryProcessProxy
     : public ThreadSafeRefCounted<AuxiliaryProcessProxy, WTF::DestructionThread::MainRunLoop>
     , public ResponsivenessTimer::Client
     , private ProcessLauncher::Client
     , public IPC::Connection::Client
-    , public ProcessThrottlerClient {
+    , public ProcessThrottlerClient
+    , public CanMakeThreadSafeCheckedPtr {
     WTF_MAKE_NONCOPYABLE(AuxiliaryProcessProxy);
 
 protected:
     AuxiliaryProcessProxy(bool alwaysRunsAtBackgroundPriority = false, Seconds responsivenessTimeout = ResponsivenessTimer::defaultResponsivenessTimeout);
 
 public:
+    using ResponsivenessTimer::Client::weakPtrFactory;
+    using ResponsivenessTimer::Client::WeakValueType;
+    using ResponsivenessTimer::Client::WeakPtrImplType;
+
     virtual ~AuxiliaryProcessProxy();
 
     static AuxiliaryProcessCreationParameters auxiliaryProcessParameters();
@@ -187,6 +197,10 @@ public:
     static bool manageProcessesAsExtensions() { return s_manageProcessesAsExtensions; }
 #endif
 
+#if ENABLE(EXTENSION_CAPABILITIES)
+    ExtensionCapabilityGrantMap& extensionCapabilityGrants() { return m_extensionCapabilityGrants; }
+#endif
+
 protected:
     // ProcessLauncher::Client
     void didFinishLaunching(ProcessLauncher*, IPC::Connection::Identifier) override;
@@ -246,6 +260,9 @@ private:
     std::unique_ptr<ProcessThrottler::ForegroundActivity> m_lifetimeActivity;
     RefPtr<ProcessAssertion> m_boostedJetsamAssertion;
 #endif
+#endif
+#if ENABLE(EXTENSION_CAPABILITIES)
+    ExtensionCapabilityGrantMap m_extensionCapabilityGrants;
 #endif
 #if USE(EXTENSIONKIT)
     static bool s_manageProcessesAsExtensions;

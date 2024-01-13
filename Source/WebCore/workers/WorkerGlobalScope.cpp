@@ -142,7 +142,8 @@ WorkerGlobalScope::~WorkerGlobalScope()
     m_crypto = nullptr;
 
     // Notify proxy that we are going away. This can free the WorkerThread object, so do not access it after this.
-    thread().workerReportingProxy().workerGlobalScopeDestroyed();
+    if (auto* workerReportingProxy = thread().workerReportingProxy())
+        workerReportingProxy->workerGlobalScopeDestroyed();
 }
 
 String WorkerGlobalScope::origin() const
@@ -155,10 +156,8 @@ void WorkerGlobalScope::prepareForDestruction()
 {
     WorkerOrWorkletGlobalScope::prepareForDestruction();
 
-#if ENABLE(SERVICE_WORKER)
     if (settingsValues().serviceWorkersEnabled)
         swClientConnection().unregisterServiceWorkerClient(identifier());
-#endif
 
     stopIndexedDatabase();
 
@@ -217,7 +216,8 @@ RefPtr<RTCDataChannelRemoteHandlerConnection> WorkerGlobalScope::createRTCDataCh
 {
     RefPtr<RTCDataChannelRemoteHandlerConnection> connection;
     callOnMainThreadAndWait([workerThread = Ref { thread() }, &connection]() mutable {
-        connection = workerThread->workerLoaderProxy().createRTCDataChannelRemoteHandlerConnection();
+        if (auto* workerLoaderProxy = workerThread->workerLoaderProxy())
+            connection = workerLoaderProxy->createRTCDataChannelRemoteHandlerConnection();
     });
     ASSERT(connection);
 
@@ -245,18 +245,14 @@ void WorkerGlobalScope::suspend()
     if (m_connectionProxy)
         m_connectionProxy->setContextSuspended(*this, true);
 
-#if ENABLE(SERVICE_WORKER)
     if (settingsValues().serviceWorkersEnabled)
         swClientConnection().unregisterServiceWorkerClient(identifier());
-#endif
 }
 
 void WorkerGlobalScope::resume()
 {
-#if ENABLE(SERVICE_WORKER)
     if (settingsValues().serviceWorkersEnabled)
         updateServiceWorkerClientData();
-#endif
 
     if (m_connectionProxy)
         m_connectionProxy->setContextSuspended(*this, false);
@@ -312,7 +308,8 @@ void WorkerGlobalScope::close()
         ASSERT_WITH_SECURITY_IMPLICATION(is<WorkerGlobalScope>(context));
         WorkerGlobalScope& workerGlobalScope = downcast<WorkerGlobalScope>(context);
         // Notify parent that this context is closed. Parent is responsible for calling WorkerThread::stop().
-        workerGlobalScope.thread().workerReportingProxy().workerGlobalScopeClosed();
+        if (auto* workerReportingProxy = workerGlobalScope.thread().workerReportingProxy())
+            workerReportingProxy->workerGlobalScopeClosed();
     } });
 }
 
@@ -386,7 +383,6 @@ ExceptionOr<void> WorkerGlobalScope::importScripts(const FixedVector<String>& ur
 
     FetchOptions::Cache cachePolicy = FetchOptions::Cache::Default;
 
-#if ENABLE(SERVICE_WORKER)
     bool isServiceWorkerGlobalScope = is<ServiceWorkerGlobalScope>(*this);
     if (isServiceWorkerGlobalScope) {
         // FIXME: We need to add support for the 'imported scripts updated' flag as per:
@@ -396,7 +392,6 @@ ExceptionOr<void> WorkerGlobalScope::importScripts(const FixedVector<String>& ur
         if (registration.updateViaCache() == ServiceWorkerUpdateViaCache::None || registration.needsUpdate())
             cachePolicy = FetchOptions::Cache::NoCache;
     }
-#endif
 
     for (auto& url : completedURLs) {
         // FIXME: Convert this to check the isolated world's Content Security Policy once webkit.org/b/104520 is solved.
@@ -441,7 +436,8 @@ EventTarget* WorkerGlobalScope::errorEventTarget()
 
 void WorkerGlobalScope::logExceptionToConsole(const String& errorMessage, const String& sourceURL, int lineNumber, int columnNumber, RefPtr<ScriptCallStack>&&)
 {
-    thread().workerReportingProxy().postExceptionToWorkerObject(errorMessage, lineNumber, columnNumber, sourceURL);
+    if (auto* workerReportingProxy = thread().workerReportingProxy())
+        workerReportingProxy->postExceptionToWorkerObject(errorMessage, lineNumber, columnNumber, sourceURL);
 }
 
 void WorkerGlobalScope::addConsoleMessage(std::unique_ptr<Inspector::ConsoleMessage>&& message)
@@ -474,14 +470,16 @@ void WorkerGlobalScope::addMessage(MessageSource source, MessageLevel level, con
     InspectorInstrumentation::addMessageToConsole(*this, WTFMove(message));
 }
 
-#if ENABLE(WEB_CRYPTO)
-
 bool WorkerGlobalScope::wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey)
 {
     Ref protectedThis { *this };
+    auto* workerLoaderProxy = thread().workerLoaderProxy();
+    if (!workerLoaderProxy)
+        return false;
+
     bool success = false;
     BinarySemaphore semaphore;
-    thread().workerLoaderProxy().postTaskToLoader([&semaphore, &success, &key, &wrappedKey](auto& context) {
+    workerLoaderProxy->postTaskToLoader([&semaphore, &success, &key, &wrappedKey](auto& context) {
         success = context.wrapCryptoKey(key, wrappedKey);
         semaphore.signal();
     });
@@ -492,17 +490,19 @@ bool WorkerGlobalScope::wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t
 bool WorkerGlobalScope::unwrapCryptoKey(const Vector<uint8_t>& wrappedKey, Vector<uint8_t>& key)
 {
     Ref protectedThis { *this };
+    auto* workerLoaderProxy = thread().workerLoaderProxy();
+    if (!workerLoaderProxy)
+        return false;
+
     bool success = false;
     BinarySemaphore semaphore;
-    thread().workerLoaderProxy().postTaskToLoader([&semaphore, &success, &key, &wrappedKey](auto& context) {
+    workerLoaderProxy->postTaskToLoader([&semaphore, &success, &key, &wrappedKey](auto& context) {
         success = context.unwrapCryptoKey(wrappedKey, key);
         semaphore.signal();
     });
     semaphore.wait();
     return success;
 }
-
-#endif // ENABLE(WEB_CRYPTO)
 
 Crypto& WorkerGlobalScope::crypto()
 {
@@ -530,14 +530,12 @@ MessagePortChannelProvider& WorkerGlobalScope::messagePortChannelProvider()
     return *m_messagePortChannelProvider;
 }
 
-#if ENABLE(SERVICE_WORKER)
 WorkerSWClientConnection& WorkerGlobalScope::swClientConnection()
 {
     if (!m_swClientConnection)
         m_swClientConnection = WorkerSWClientConnection::create(*this);
     return *m_swClientConnection;
 }
-#endif
 
 void WorkerGlobalScope::createImageBitmap(ImageBitmap::Source&& source, ImageBitmapOptions&& options, ImageBitmap::Promise&& promise)
 {
@@ -644,7 +642,8 @@ void WorkerGlobalScope::addImportedScriptSourceProvider(const URL& url, ScriptBu
 
 void WorkerGlobalScope::reportErrorToWorkerObject(const String& errorMessage)
 {
-    thread().workerReportingProxy().reportErrorToWorkerObject(errorMessage);
+    if (auto* workerReportingProxy = thread().workerReportingProxy())
+        workerReportingProxy->reportErrorToWorkerObject(errorMessage);
 }
 
 void WorkerGlobalScope::clearDecodedScriptData()
@@ -681,7 +680,6 @@ void WorkerGlobalScope::updateSourceProviderBuffers(const ScriptBuffer& mainScri
     }
 }
 
-#if ENABLE(SERVICE_WORKER)
 void WorkerGlobalScope::updateServiceWorkerClientData()
 {
     if (!settingsValues().serviceWorkersEnabled)
@@ -691,7 +689,6 @@ void WorkerGlobalScope::updateServiceWorkerClientData()
     auto controllingServiceWorkerRegistrationIdentifier = activeServiceWorker() ? std::make_optional<ServiceWorkerRegistrationIdentifier>(activeServiceWorker()->registrationIdentifier()) : std::nullopt;
     swClientConnection().registerServiceWorkerClient(clientOrigin(), ServiceWorkerClientData::from(*this), controllingServiceWorkerRegistrationIdentifier, String { m_userAgent });
 }
-#endif
 
 void WorkerGlobalScope::notifyReportObservers(Ref<Report>&& reports)
 {

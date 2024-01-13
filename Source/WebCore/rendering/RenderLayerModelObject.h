@@ -28,8 +28,11 @@
 
 namespace WebCore {
 
-class KeyframeList;
+class BlendingKeyframes;
 class RenderLayer;
+class RenderSVGResourceClipper;
+class RenderSVGResourceMasker;
+class RenderSVGResourcePaintServer;
 class SVGGraphicsElement;
 
 class RenderLayerModelObject : public RenderElement {
@@ -54,7 +57,7 @@ public:
 
     // Returns false if the rect has no intersection with the applied clip rect. When the context specifies edge-inclusive
     // intersection, this return value allows distinguishing between no intersection and zero-area intersection.
-    virtual bool applyCachedClipAndScrollPosition(LayoutRect&, const RenderLayerModelObject*, VisibleRectContext) const { return false; }
+    virtual bool applyCachedClipAndScrollPosition(RepaintRects&, const RenderLayerModelObject*, VisibleRectContext) const { return false; }
 
     virtual bool isScrollableOrRubberbandableBox() const { return false; }
 
@@ -62,7 +65,7 @@ public:
 
     std::optional<LayoutRect> cachedLayerClippedOverflowRect() const;
 
-    bool startAnimation(double timeOffset, const Animation&, const KeyframeList&) override;
+    bool startAnimation(double timeOffset, const Animation&, const BlendingKeyframes&) override;
     void animationPaused(double timeOffset, const String& name) override;
     void animationFinished(const String& name) override;
     void transformRelatedPropertyDidChange() override;
@@ -74,9 +77,9 @@ public:
     // use this method to test if they should continue processing in the paint() function or stop.
     bool shouldPaintSVGRenderer(const PaintInfo&, const OptionSet<PaintPhase> relevantPaintPhases = OptionSet<PaintPhase>()) const;
 
-    // Provides the SVG implementation for computeVisibleRectInContainer().
+    // Provides the SVG implementation for computeVisibleRectsInContainer().
     // This lives in RenderLayerModelObject, which is the common base-class for all SVG renderers.
-    std::optional<LayoutRect> computeVisibleRectInSVGContainer(const LayoutRect&, const RenderLayerModelObject* container, VisibleRectContext) const;
+    std::optional<RepaintRects> computeVisibleRectsInSVGContainer(const RepaintRects&, const RenderLayerModelObject* container, VisibleRectContext) const;
 
     // Provides the SVG implementation for mapLocalToContainer().
     // This lives in RenderLayerModelObject, which is the common base-class for all SVG renderers.
@@ -91,6 +94,15 @@ public:
     LayoutPoint nominalSVGLayoutLocation() const { return flooredLayoutPoint(objectBoundingBoxWithoutTransformations().minXMinYCorner()); }
     virtual LayoutPoint currentSVGLayoutLocation() const { ASSERT_NOT_REACHED(); return { }; }
     virtual void setCurrentSVGLayoutLocation(const LayoutPoint&) { ASSERT_NOT_REACHED(); }
+
+    RenderSVGResourcePaintServer* svgFillPaintServerResourceFromStyle(const RenderStyle&) const;
+    RenderSVGResourcePaintServer* svgStrokePaintServerResourceFromStyle(const RenderStyle&) const;
+
+    RenderSVGResourceClipper* svgClipperResourceFromStyle() const;
+    RenderSVGResourceMasker* svgMaskerResourceFromStyle() const;
+
+    void paintSVGClippingMask(PaintInfo&) const;
+    void paintSVGMask(PaintInfo&, const LayoutPoint& adjustedPaintOffset) const;
 #endif
 
     TransformationMatrix* layerTransform() const;
@@ -100,8 +112,8 @@ public:
     void applyTransform(TransformationMatrix&, const RenderStyle&, const FloatRect& boundingBox) const;
 
 protected:
-    RenderLayerModelObject(Type, Element&, RenderStyle&&, BaseTypeFlags);
-    RenderLayerModelObject(Type, Document&, RenderStyle&&, BaseTypeFlags);
+    RenderLayerModelObject(Type, Element&, RenderStyle&&, OptionSet<TypeFlag>, TypeSpecificFlags);
+    RenderLayerModelObject(Type, Document&, RenderStyle&&, OptionSet<TypeFlag>, TypeSpecificFlags);
 
     void createLayer();
     void willBeDestroyed() override;

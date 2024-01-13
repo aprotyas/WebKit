@@ -304,6 +304,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/Modules/cookie-store/LocalDOMWindow+CookieStore.idl \
     $(WebCore)/Modules/credentialmanagement/BasicCredential.idl \
     $(WebCore)/Modules/credentialmanagement/CredentialCreationOptions.idl \
+    $(WebCore)/Modules/credentialmanagement/CredentialMediationRequirement.idl \
     $(WebCore)/Modules/credentialmanagement/CredentialRequestOptions.idl \
     $(WebCore)/Modules/credentialmanagement/CredentialsContainer.idl \
     $(WebCore)/Modules/credentialmanagement/Navigator+Credentials.idl \
@@ -524,6 +525,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/Modules/mediastream/RTCStatsReport.idl \
     $(WebCore)/Modules/mediastream/RTCTrackEvent.idl \
     $(WebCore)/Modules/mediastream/RTCTransformEvent.idl \
+    $(WebCore)/Modules/mediastream/VideoTrackGenerator.idl \
     $(WebCore)/Modules/model-element/HTMLModelElement.idl \
     $(WebCore)/Modules/model-element/HTMLModelElementCamera.idl \
     $(WebCore)/Modules/notifications/Notification.idl \
@@ -745,6 +747,13 @@ JS_BINDING_IDLS := \
     $(WebCore)/Modules/webcodecs/WebCodecsAlphaOption.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsAudioData.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsAudioDataOutputCallback.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsAudioDecoder.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsAudioDecoderConfig.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsAudioDecoderSupport.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsAudioEncoder.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsAudioEncoderConfig.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsAudioEncoderSupport.idl \
+    $(WebCore)/Modules/webcodecs/WebCodecsCodecState.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsEncodedAudioChunk.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsEncodedAudioChunkMetadata.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsEncodedAudioChunkOutputCallback.idl \
@@ -754,15 +763,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/Modules/webcodecs/WebCodecsEncodedVideoChunkOutputCallback.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsEncodedVideoChunkType.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsErrorCallback.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsCodecState.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsSvcOutputMetadata.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioData.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioDecoder.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioDecoderConfig.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioDecoderSupport.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioEncoder.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioEncoderConfig.idl \
-    $(WebCore)/Modules/webcodecs/WebCodecsAudioEncoderSupport.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsVideoDecoder.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsVideoDecoderConfig.idl \
     $(WebCore)/Modules/webcodecs/WebCodecsVideoDecoderSupport.idl \
@@ -1026,6 +1027,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/dom/ContentVisibilityAutoStateChangeEvent.idl \
     $(WebCore)/dom/CustomElementRegistry.idl \
     $(WebCore)/dom/CustomEvent.idl \
+    $(WebCore)/dom/CustomStateSet.idl \
     $(WebCore)/dom/DOMException.idl \
     $(WebCore)/dom/DOMImplementation.idl \
     $(WebCore)/dom/DOMPoint.idl \
@@ -1055,6 +1057,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/dom/Document+Selection.idl \
     $(WebCore)/dom/Document+StorageAccess.idl \
     $(WebCore)/dom/Document+UndoMananger.idl \
+    $(WebCore)/dom/Document+ViewTransition.idl \
     $(WebCore)/dom/DocumentAndElementEventHandlers.idl \
     $(WebCore)/dom/DocumentFragment.idl \
     $(WebCore)/dom/DocumentOrShadowRoot.idl \
@@ -1091,6 +1094,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/dom/IdleRequestOptions.idl \
     $(WebCore)/dom/InnerHTML.idl \
     $(WebCore)/dom/InputEvent.idl \
+    $(WebCore)/dom/InvokeEvent.idl \
     $(WebCore)/dom/KeyboardEvent.idl \
     $(WebCore)/dom/MessageChannel.idl \
     $(WebCore)/dom/MessageEvent.idl \
@@ -1143,6 +1147,8 @@ JS_BINDING_IDLS := \
     $(WebCore)/dom/UIEvent.idl \
     $(WebCore)/dom/UIEventInit.idl \
     $(WebCore)/dom/ValidityStateFlags.idl \
+    $(WebCore)/dom/ViewTransition.idl \
+    $(WebCore)/dom/ViewTransitionUpdateCallback.idl \
     $(WebCore)/dom/VisibilityState.idl \
     $(WebCore)/dom/WheelEvent.idl \
     $(WebCore)/dom/XMLDocument.idl \
@@ -1245,6 +1251,7 @@ JS_BINDING_IDLS := \
     $(WebCore)/html/ImageBitmapOptions.idl \
     $(WebCore)/html/ImageData.idl \
     $(WebCore)/html/ImageDataSettings.idl \
+    $(WebCore)/html/InvokerElement.idl \
     $(WebCore)/html/MediaController.idl \
     $(WebCore)/html/MediaEncryptedEvent.idl \
     $(WebCore)/html/MediaError.idl \
@@ -1708,8 +1715,6 @@ JS_BINDING_IDLS := \
 ADDITIONAL_BINDING_IDLS = \
     DocumentTouch.idl \
     GestureEvent.idl \
-    Internals+Additions.idl \
-    InternalsAdditions.idl \
     Touch.idl \
     TouchEvent.idl \
     TouchList.idl \
@@ -1717,7 +1722,7 @@ ADDITIONAL_BINDING_IDLS = \
 
 vpath %.in $(WEBKITADDITIONS_HEADER_SEARCH_PATHS)
 
-ADDITIONAL_EVENT_NAMES =
+ADDITIONAL_EVENT_INTERFACES =
 ADDITIONAL_EVENT_TARGET_FACTORY =
 
 -include WebCoreDerivedSourcesAdditions.make
@@ -1774,11 +1779,15 @@ all : \
     CSSPropertyNames.h \
     CSSPropertyParsing.cpp \
     CSSPropertyParsing.h \
+    CSSSelectorEnums.h \
+    CSSSelectorInlines.h \
     CSSValueKeywords.cpp \
     CSSValueKeywords.h \
     ColorData.cpp \
     DOMJITAbstractHeapRepository.h \
     EventInterfaces.h \
+    EventNames.cpp \
+    EventNames.h \
     EventTargetInterfaces.h \
     HTMLElementFactory.cpp \
     HTMLElementFactory.h \
@@ -1803,7 +1812,7 @@ all : \
     SVGNames.cpp \
     SVGNames.h \
     SelectorPseudoClassAndCompatibilityElementMap.cpp \
-    SelectorPseudoElementTypeMap.cpp \
+    SelectorPseudoElementMap.cpp \
     StyleBuilderGenerated.cpp \
     StylePropertyShorthandFunctions.cpp \
     StylePropertyShorthandFunctions.h \
@@ -1817,6 +1826,8 @@ all : \
     MathMLElementTypeHelpers.h \
     MathMLNames.cpp \
     MathMLNames.h \
+    UserAgentParts.cpp \
+    UserAgentParts.h \
 #
 
 # --------
@@ -1857,13 +1868,24 @@ $(CSS_VALUE_KEYWORD_FILES_PATTERNS) : $(WEBCORE_CSS_VALUE_KEYWORDS) $(WebCore)/c
 
 # --------
 
-# CSS Selector pseudo type name to value map.
+# CSS pseudo class & element selector code and maps.
 
-SelectorPseudoClassAndCompatibilityElementMap.cpp : $(WebCore)/css/makeSelectorPseudoClassAndCompatibilityElementMap.py $(WebCore)/css/SelectorPseudoClassAndCompatibilityElementMap.in $(FEATURE_AND_PLATFORM_DEFINE_DEPENDENCIES)
-	$(PYTHON) "$(WebCore)/css/makeSelectorPseudoClassAndCompatibilityElementMap.py" $(WebCore)/css/SelectorPseudoClassAndCompatibilityElementMap.in $(GPERF) "$(FEATURE_AND_PLATFORM_DEFINES)"
+WEBCORE_CSS_PSEUDO_SELECTORS := $(WebCore)/css/CSSPseudoSelectors.json
 
-SelectorPseudoElementTypeMap.cpp : $(WebCore)/css/makeSelectorPseudoElementsMap.py $(WebCore)/css/SelectorPseudoElementTypeMap.in $(FEATURE_AND_PLATFORM_DEFINE_DEPENDENCIES)
-	$(PYTHON) "$(WebCore)/css/makeSelectorPseudoElementsMap.py" $(WebCore)/css/SelectorPseudoElementTypeMap.in $(GPERF) "$(FEATURE_AND_PLATFORM_DEFINES)"
+CSS_PSEUDO_SELECTOR_FILES = \
+    CSSSelectorEnums.h \
+    CSSSelectorInlines.h \
+    SelectorPseudoClassAndCompatibilityElementMap.cpp \
+    SelectorPseudoElementMap.cpp \
+    UserAgentParts.cpp \
+    UserAgentParts.h \
+
+#
+CSS_PSEUDO_SELECTOR_FILES_PATTERNS = $(subst .,%,$(CSS_PSEUDO_SELECTOR_FILES))
+all : $(CSS_PSEUDO_SELECTOR_FILES)
+$(CSS_PSEUDO_SELECTOR_FILES_PATTERNS) : $(WEBCORE_CSS_PSEUDO_SELECTORS) $(WebCore)/css/process-css-pseudo-selectors.py $(FEATURE_AND_PLATFORM_DEFINE_DEPENDENCIES)
+	$(PERL) -pe '' $(WEBCORE_CSS_PSEUDO_SELECTORS) > CSSPseudoSelectors.json
+	$(PYTHON) "$(WebCore)/css/process-css-pseudo-selectors.py" --gperf-executable $(GPERF) --defines "$(FEATURE_AND_PLATFORM_DEFINES)"
 
 # --------
 
@@ -1983,12 +2005,10 @@ POSSIBLE_ADDITIONAL_USER_AGENT_STYLE_SHEETS = \
 
 USER_AGENT_STYLE_SHEETS = \
     $(WebCore)/css/counterStyles.css \
-    $(WebCore)/css/dialog.css \
     $(WebCore)/css/fullscreen.css \
     $(WebCore)/css/horizontalFormControls.css \
     $(WebCore)/css/html.css \
     $(WebCore)/css/htmlSwitchControl.css \
-    $(WebCore)/css/legacyFormControlsIOS.css \
     $(WebCore)/css/mathml.css \
     $(WebCore)/css/mediaControls.css \
     $(WebCore)/css/plugIns.css \
@@ -1996,6 +2016,7 @@ USER_AGENT_STYLE_SHEETS = \
     $(WebCore)/css/quirks.css \
     $(WebCore)/css/ruby.css \
     $(WebCore)/css/svg.css \
+    $(WebCore)/css/viewTransitions.css \
     $(WebCore)/html/shadow/mac/imageControlsMac.css \
     $(WebCore)/html/shadow/attachmentElementShadow.css \
     $(WebCore)/html/shadow/imageOverlay.css \
@@ -2210,7 +2231,7 @@ $(XLINK_NAMES_FILES_PATTERNS) : $(WebCore)/dom/make_names.pl $(WebCore)/bindings
 
 # Register event constructors and targets
 
-EVENT_NAMES = $(WebCore)/dom/EventNames.in $(ADDITIONAL_EVENT_NAMES)
+EVENT_INTERFACES = $(WebCore)/dom/EventInterfaces.in $(ADDITIONAL_EVENT_INTERFACES)
 
 EVENT_FACTORY_FILES = \
     EventFactory.cpp \
@@ -2220,7 +2241,7 @@ EVENT_FACTORY_FILES = \
 EVENT_FACTORY_PATTERNS = $(subst .,%,$(EVENT_FACTORY_FILES))
 
 all : $(EVENT_FACTORY_FILES)
-$(EVENT_FACTORY_PATTERNS) : $(WebCore)/dom/make_event_factory.pl $(EVENT_NAMES)
+$(EVENT_FACTORY_PATTERNS) : $(WebCore)/dom/make_event_factory.pl $(EVENT_INTERFACES)
 	$(PERL) $< $(addprefix --input , $(filter-out $(WebCore)/dom/make_event_factory.pl, $^))
 
 EVENT_TARGET_FACTORY = $(WebCore)/dom/EventTargetFactory.in $(ADDITIONAL_EVENT_TARGET_FACTORY)
@@ -2235,6 +2256,22 @@ EVENT_TARGET_FACTORY_PATTERNS = $(subst .,%,$(EVENT_TARGET_FACTORY_FILES))
 all : $(EVENT_TARGET_FACTORY_FILES)
 $(EVENT_TARGET_FACTORY_PATTERNS) : $(WebCore)/dom/make_event_factory.pl $(EVENT_TARGET_FACTORY)
 	$(PERL) $< $(addprefix --input , $(filter-out $(WebCore)/dom/make_event_factory.pl, $^))
+
+# --------
+
+# Event names
+
+EVENT_NAME_JSON := $(WebCore)/dom/EventNames.json
+
+EVENT_NAME_FILES = \
+    EventNames.cpp \
+    EventNames.h \
+#
+EVENT_NAME_FILES_PATTERNS = $(subst .,%,$(EVENT_NAME_FILES))
+
+all : $(EVENT_NAME_FILES)
+$(EVENT_NAME_FILES_PATTERNS) : $(WebCore)/dom/make-event-names.py $(EVENT_NAME_JSON)
+	$(PYTHON) "$(WebCore)/dom/make-event-names.py" --event-names $(EVENT_NAME_JSON)
 
 # --------
 

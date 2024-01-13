@@ -435,8 +435,8 @@ AffineTransform SVGSVGElement::localCoordinateSpaceTransform(SVGLocatable::CTMSc
             // to map an element from SVG viewport coordinates to CSS box coordinates.
             // LegacyRenderSVGRoot's localToAbsolute method expects CSS box coordinates.
             // We also need to adjust for the zoom level factored into CSS coordinates (bug #96361).
-            if (is<LegacyRenderSVGRoot>(*renderer)) {
-                location = downcast<LegacyRenderSVGRoot>(*renderer).localToBorderBoxTransform().mapPoint(location);
+            if (auto* legacyRenderSVGRoot = dynamicDowncast<LegacyRenderSVGRoot>(*renderer)) {
+                location = legacyRenderSVGRoot->localToBorderBoxTransform().mapPoint(location);
                 zoomFactor = 1 / renderer->style().effectiveZoom();
             }
 
@@ -706,7 +706,8 @@ SVGSVGElement* SVGSVGElement::findRootAnchor(StringView fragmentIdentifier) cons
 
 bool SVGSVGElement::scrollToFragment(StringView fragmentIdentifier)
 {
-    auto renderer = this->renderer();
+    auto* renderer = downcast<RenderLayerModelObject>(this->renderer());
+
     auto view = m_viewSpec;
     if (view)
         view->reset();
@@ -714,10 +715,21 @@ bool SVGSVGElement::scrollToFragment(StringView fragmentIdentifier)
     bool hadUseCurrentView = m_useCurrentView;
     m_useCurrentView = false;
 
+    auto invalidateView = [&](RenderElement& renderer) {
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+        if (renderer.document().settings().layerBasedSVGEngineEnabled()) {
+            renderer.repaint();
+            return;
+        }
+#endif
+
+        LegacyRenderSVGResource::markForLayoutAndParentResourceInvalidation(renderer);
+    };
+
     if (fragmentIdentifier.startsWith("xpointer("_s)) {
         // FIXME: XPointer references are ignored (https://bugs.webkit.org/show_bug.cgi?id=17491)
         if (renderer && hadUseCurrentView)
-            LegacyRenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
+            invalidateView(*renderer);
         return false;
     }
 
@@ -729,7 +741,7 @@ bool SVGSVGElement::scrollToFragment(StringView fragmentIdentifier)
         else
             view->reset();
         if (renderer && (hadUseCurrentView || m_useCurrentView))
-            LegacyRenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
+            invalidateView(*renderer);
         return m_useCurrentView;
     }
 
@@ -754,7 +766,7 @@ bool SVGSVGElement::scrollToFragment(StringView fragmentIdentifier)
 
             rootElement->inheritViewAttributes(*viewElement);
             if (auto* renderer = rootElement->renderer())
-                LegacyRenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
+                invalidateView(*renderer);
             m_currentViewFragmentIdentifier = fragmentIdentifier.toString();
             return true;
         }
@@ -784,8 +796,19 @@ void SVGSVGElement::resetScrollAnchor()
     }
 
     m_useCurrentView = false;
-    if (renderer())
-        LegacyRenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer());
+
+    auto* renderer = this->renderer();
+    if (!renderer)
+        return;
+
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (document().settings().layerBasedSVGEngineEnabled()) {
+        renderer->repaint();
+        return;
+    }
+#endif
+
+    LegacyRenderSVGResource::markForLayoutAndParentResourceInvalidation(*renderer);
 }
 
 void SVGSVGElement::inheritViewAttributes(const SVGViewElement& viewElement)

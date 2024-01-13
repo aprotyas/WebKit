@@ -114,11 +114,10 @@ public:
 
     Vector<LinkRecord, 0, UnsafeVectorOverflow>& jumpsToLink() { return m_assembler.jumpsToLink(); }
     static bool canCompact(JumpType jumpType) { return ARMv7Assembler::canCompact(jumpType); }
-    static JumpLinkType computeJumpType(JumpType jumpType, const uint8_t* from, const uint8_t* to) { return ARMv7Assembler::computeJumpType(jumpType, from, to); }
     static JumpLinkType computeJumpType(LinkRecord& record, const uint8_t* from, const uint8_t* to) { return ARMv7Assembler::computeJumpType(record, from, to); }
     static int jumpSizeDelta(JumpType jumpType, JumpLinkType jumpLinkType) { return ARMv7Assembler::jumpSizeDelta(jumpType, jumpLinkType); }
 
-    template <Assembler::CopyFunction copy>
+    template<MachineCodeCopyMode copy>
     ALWAYS_INLINE static void link(LinkRecord& record, uint8_t* from, const uint8_t* fromInstruction, uint8_t* to) { return ARMv7Assembler::link<copy>(record, from, fromInstruction, to); }
 
     struct ArmAddress {
@@ -535,6 +534,22 @@ public:
         rotateRight32(srcDst, imm, srcDst);
     }
 
+    void rotateLeft32(RegisterID src, RegisterID shift, RegisterID dest)
+    {
+        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
+        m_assembler.ARM_and(scratch, shift, ARMThumbImmediate::makeEncodedImm(0x1f));
+        m_assembler.sub(scratch, ARMThumbImmediate::makeUInt12(32), scratch);
+        m_assembler.ror(dest, src, scratch);
+    }
+
+    void rotateLeft32(RegisterID src, TrustedImm32 shift, RegisterID dest)
+    {
+        RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
+        move(shift, scratch);
+        m_assembler.ARM_and(scratch, scratch, ARMThumbImmediate::makeEncodedImm(0x1f));
+        m_assembler.sub(scratch, ARMThumbImmediate::makeUInt12(32), scratch);
+        m_assembler.ror(dest, src, scratch);
+    }
     void rshift32(RegisterID src, RegisterID shiftAmount, RegisterID dest)
     {
         RegisterID scratch = getCachedDataTempRegisterIDAndInvalidate();
@@ -1721,6 +1736,12 @@ public:
         m_assembler.vcvt_signedToFloatingPoint(dest, fpTempRegisterAsSingle(), /* toDouble: */ false);
     }
 
+    void convertInt32ToDouble(TrustedImm32 imm, FPRegisterID dest)
+    {
+        move(imm, dataTempRegister);
+        convertInt32ToDouble(dataTempRegister, dest);
+    }
+
     void convertInt32ToDouble(RegisterID src, FPRegisterID dest)
     {
         m_assembler.vmov(fpTempRegister, src, src);
@@ -2689,6 +2710,13 @@ public:
         m_assembler.udf(imm);
     }
 
+    void setCarry(RegisterID dest)
+    {
+        m_assembler.it(ARMv7Assembler::ConditionCS, false);
+        move(TrustedImm32(1), dest);
+        move(TrustedImm32(0), dest);
+    }
+
     static bool isBreakpoint(void* address) { return ARMv7Assembler::isBkpt(address); }
 
     ALWAYS_INLINE Call nearCall()
@@ -2740,10 +2768,11 @@ public:
     ALWAYS_INLINE Call call(RegisterID target, RegisterID callTag) { return UNUSED_PARAM(callTag), call(target, NoPtrTag); }
     ALWAYS_INLINE Call call(Address address, RegisterID callTag) { return UNUSED_PARAM(callTag), call(address, NoPtrTag); }
 
-    ALWAYS_INLINE void callOperation(const CodePtr<OperationPtrTag> operation)
+    template<PtrTag tag>
+    ALWAYS_INLINE void callOperation(const CodePtr<tag> operation)
     {
         move(TrustedImmPtr(operation.taggedPtr()), addressTempRegister);
-        call(addressTempRegister, OperationPtrTag);
+        call(addressTempRegister, tag);
     }
 
     ALWAYS_INLINE void ret()
@@ -2839,6 +2868,18 @@ public:
         m_assembler.it(armV7Condition(cond), false);
         m_assembler.mov(dest, ARMThumbImmediate::makeUInt16(1));
         m_assembler.mov(dest, ARMThumbImmediate::makeUInt16(0));
+    }
+
+    void moveConditionally32(RelationalCondition cond, RegisterID left, TrustedImm32 right, RegisterID thenCase, RegisterID elseCase, RegisterID dest)
+    {
+        auto passCase = branch32(cond, left, right);
+        move(elseCase, dest);
+        auto done = jump();
+
+        passCase.link(this);
+        move(thenCase, dest);
+
+        done.link(this);
     }
 
     ALWAYS_INLINE DataLabel32 moveWithPatch(TrustedImm32 imm, RegisterID dst)

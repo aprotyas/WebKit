@@ -31,6 +31,8 @@
 #import "WebExtensionDynamicScripts.h"
 
 #if ENABLE(WK_WEB_EXTENSIONS)
+#import "APIData.h"
+#import "CocoaHelpers.h"
 #import "WKContentWorld.h"
 #import "WKFrameInfoPrivate.h"
 #import "WKWebViewInternal.h"
@@ -39,7 +41,6 @@
 #import "WebExtensionContext.h"
 #import "WebExtensionFrameIdentifier.h"
 #import "WebExtensionScriptInjectionParameters.h"
-#import "WebExtensionScriptInjectionResultParameters.h"
 #import "WebExtensionUtilities.h"
 #import "WebPageProxy.h"
 #import "WebUserContentControllerProxy.h"
@@ -52,8 +53,6 @@
 namespace WebKit {
 
 namespace WebExtensionDynamicScripts {
-
-using UserStyleSheetVector = WebExtensionContext::UserStyleSheetVector;
 
 static bool userStyleSheetMatchesContent(Ref<API::UserStyleSheet> userStyleSheet, SourcePair styleSheetContent, WebCore::UserContentInjectedFrames injectedFrames)
 {
@@ -124,7 +123,7 @@ void executeScript(std::optional<SourcePairs> scriptPairs, WKWebView *webView, A
 
             if (parameters.function) {
                 NSString *javaScript = [NSString stringWithFormat:@"return (%@)(...arguments)", (NSString *)parameters.function.value()];
-                NSArray *arguments = parameters.arguments ? createNSArray(parameters.arguments.value()).get() : @[ ];
+                NSArray *arguments = parameters.arguments ? parseJSON(parameters.arguments.value(), JSONOptions::FragmentsAllowed) : @[ ];
 
                 [webView _callAsyncJavaScript:javaScript arguments:@{ @"arguments": arguments } inFrame:frameInfo inContentWorld:world completionHandler:makeBlockPtr([injectionResults, aggregator, frameInfo](id resultOfExecution, NSError *error) mutable {
                     injectionResults->results.append(toInjectionResultParameters(resultOfExecution, frameInfo, error.localizedDescription));
@@ -185,7 +184,7 @@ WebExtensionScriptInjectionResultParameters toInjectionResultParameters(id resul
     WebExtensionScriptInjectionResultParameters parameters;
 
     if (resultOfExecution)
-        parameters.result = resultOfExecution;
+        parameters.resultJSON = encodeJSONString(resultOfExecution, JSONOptions::FragmentsAllowed);
 
     if (info)
         parameters.frameID = toWebExtensionFrameIdentifier(info);
@@ -194,6 +193,89 @@ WebExtensionScriptInjectionResultParameters toInjectionResultParameters(id resul
         parameters.error = errorMessage;
 
     return parameters;
+}
+
+WebExtensionRegisteredScript::WebExtensionRegisteredScript(WebExtensionContext& extensionContext, const WebExtensionRegisteredScriptParameters& parameters)
+    : m_extensionContext(extensionContext)
+    , m_parameters(parameters)
+{
+
+}
+
+void WebExtensionRegisteredScript::updateParameters(const WebExtensionRegisteredScriptParameters& parameters)
+{
+    m_parameters = parameters;
+}
+
+void WebExtensionRegisteredScript::merge(WebExtensionRegisteredScriptParameters& parameters)
+{
+    if (!parameters.css && m_parameters.css)
+        parameters.css = m_parameters.css.value();
+
+    if (!parameters.js && m_parameters.js)
+        parameters.js = m_parameters.js.value();
+
+    if (!parameters.injectionTime)
+        parameters.injectionTime = m_parameters.injectionTime.value();
+
+    if (!parameters.excludeMatchPatterns && m_parameters.excludeMatchPatterns)
+        parameters.excludeMatchPatterns = m_parameters.excludeMatchPatterns.value();
+
+    if (!parameters.matchPatterns)
+        parameters.matchPatterns = m_parameters.matchPatterns.value();
+
+    if (!parameters.allFrames)
+        parameters.allFrames = m_parameters.allFrames.value();
+
+    if (!parameters.persistent)
+        parameters.persistent = m_parameters.persistent.value();
+
+    if (!parameters.world)
+        parameters.world = m_parameters.world.value();
+}
+
+void WebExtensionRegisteredScript::addUserScript(const String& identifier, API::UserScript& userScript)
+{
+    auto& userScripts = m_userScriptsMap.ensure(identifier, [&] {
+        return UserScriptVector { };
+    }).iterator->value;
+    userScripts.append(userScript);
+}
+
+void WebExtensionRegisteredScript::addUserStyleSheet(const String& identifier, API::UserStyleSheet& userStyleSheet)
+{
+    auto& userStyleSheets = m_userStyleSheetsMap.ensure(identifier, [&] {
+        return UserStyleSheetVector { };
+    }).iterator->value;
+    userStyleSheets.append(userStyleSheet);
+}
+
+void WebExtensionRegisteredScript::removeUserScriptsAndStyleSheets(const String& identifier)
+{
+    removeUserScripts(identifier);
+    removeUserStyleSheets(identifier);
+}
+
+void WebExtensionRegisteredScript::removeUserScripts(const String& identifier)
+{
+    auto userScripts = m_userScriptsMap.take(identifier);
+    auto allUserContentControllers = m_extensionContext->extensionController()->allUserContentControllers();
+
+    for (auto& userScript : userScripts) {
+        for (auto& userContentController : allUserContentControllers)
+            userContentController.removeUserScript(userScript);
+    }
+}
+
+void WebExtensionRegisteredScript::removeUserStyleSheets(const String& identifier)
+{
+    auto userStyleSheets = m_userStyleSheetsMap.take(identifier);
+    auto allUserContentControllers = m_extensionContext->extensionController()->allUserContentControllers();
+
+    for (auto& userStyleSheet : userStyleSheets) {
+        for (auto& userContentController : allUserContentControllers)
+            userContentController.removeUserStyleSheet(userStyleSheet);
+    }
 }
 
 } // namespace WebExtensionDynamicScripts

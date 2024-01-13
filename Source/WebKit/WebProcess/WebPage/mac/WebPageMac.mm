@@ -96,7 +96,6 @@
 #import <WebCore/ScrollView.h>
 #import <WebCore/StyleInheritedData.h>
 #import <WebCore/TextIterator.h>
-#import <WebCore/ThemeMac.h>
 #import <WebCore/VisibleUnits.h>
 #import <WebCore/WindowsKeyboardCodes.h>
 #import <pal/spi/cocoa/LaunchServicesSPI.h>
@@ -588,7 +587,7 @@ void WebPage::setTopOverhangImage(WebImage* image)
     if (!frameView)
         return;
 
-    auto* layer = frameView->setWantsLayerForTopOverHangArea(image);
+    RefPtr layer = frameView->setWantsLayerForTopOverHangArea(image);
     if (!layer)
         return;
 
@@ -607,7 +606,7 @@ void WebPage::setBottomOverhangImage(WebImage* image)
     if (!frameView)
         return;
 
-    auto* layer = frameView->setWantsLayerForBottomOverHangArea(image);
+    RefPtr layer = frameView->setWantsLayerForBottomOverHangArea(image);
     if (!layer)
         return;
 
@@ -621,7 +620,7 @@ void WebPage::setBottomOverhangImage(WebImage* image)
 
 void WebPage::setUseFormSemanticContext(bool useFormSemanticContext)
 {
-    ThemeMac::setUseFormSemanticContext(useFormSemanticContext);
+    RenderTheme::singleton().setUseFormSemanticContext(useFormSemanticContext);
 }
 
 void WebPage::semanticContextDidChange(bool useFormSemanticContext)
@@ -1062,11 +1061,25 @@ void WebPage::playbackTargetPickerWasDismissed(PlaybackTargetClientContextIdenti
 }
 #endif
 
+void WebPage::didBeginMagnificationGesture()
+{
+#if ENABLE(PDF_PLUGIN)
+    if (auto* pluginView = mainFramePlugIn()) {
+        pluginView->didBeginMagnificationGesture();
+        return;
+    }
+#endif
+}
+
 void WebPage::didEndMagnificationGesture()
 {
 #if ENABLE(MAC_GESTURE_EVENTS)
     if (RefPtr localMainFrame = dynamicDowncast<LocalFrame>(m_page->mainFrame()))
         localMainFrame->eventHandler().didEndMagnificationGesture();
+#endif
+#if ENABLE(PDF_PLUGIN)
+    if (auto* pluginView = mainFramePlugIn())
+        pluginView->didEndMagnificationGesture();
 #endif
 }
 

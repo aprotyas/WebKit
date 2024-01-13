@@ -138,10 +138,6 @@
 #import <UIKit/_UIContextMenuAsyncConfiguration.h>
 #endif
 
-#if HAVE(UI_TEXT_CURSOR_DRAG_ANIMATOR)
-#import <UIKit/_UITextCursorDragAnimator.h>
-#endif
-
 #if HAVE(UIFINDINTERACTION)
 #import <UIKit/UIFindSession_Private.h>
 #import <UIKit/_UIFindInteraction.h>
@@ -375,7 +371,6 @@ typedef struct CGSVGDocument *CGSVGDocumentRef;
 - (BOOL)handleKeyInputMethodCommandForCurrentEvent;
 - (void)addInputString:(NSString *)string withFlags:(NSUInteger)flags withInputManagerHint:(NSString *)hint;
 - (BOOL)autocorrectSpellingEnabled;
-- (void)clearShiftState;
 - (void)deleteFromInputWithFlags:(NSUInteger)flags;
 - (void)replaceText:(id)replacement;
 @property (nonatomic, readwrite, retain) UIResponder <UIKeyInput> *delegate;
@@ -519,7 +514,6 @@ typedef enum {
 @protocol UITextInputPrivate <UITextInput, UITextInputTokenizer, UITextInputTraits_Private>
 @optional
 - (BOOL)requiresKeyEvents;
-- (NSArray *)metadataDictionariesForDictationResults;
 - (UIColor *)textColorForCaretSelection;
 - (UIFont *)fontForCaretSelection;
 - (UIView *)automaticallySelectedOverlay;
@@ -1228,16 +1222,6 @@ typedef NS_ENUM(NSUInteger, _UIScrollDeviceCategory) {
 
 @end
 
-@protocol UIAsyncTextInput_Staging_117155812 <UIAsyncTextInput>
-
-- (void)deleteInDirection:(UITextStorageDirection)direction toGranularity:(UITextGranularity)granularity;
-- (void)moveInDirection:(UITextStorageDirection)direction byGranularity:(UITextGranularity)granularity;
-- (void)extendInDirection:(UITextStorageDirection)direction byGranularity:(UITextGranularity)granularity;
-- (void)moveInLayoutDirection:(UITextLayoutDirection)direction;
-- (void)extendInLayoutDirection:(UITextLayoutDirection)direction;
-
-@end
-
 #if !defined(UI_DIRECTIONAL_TEXT_RANGE_STRUCT)
 
 typedef struct {
@@ -1251,7 +1235,50 @@ typedef struct {
 @property (nonatomic, assign, readwrite) BOOL shouldEvaluateForInputSystemHandling;
 @end
 
+@protocol UIAsyncTextInputDelegate_Staging<UIAsyncTextInputDelegate>
+- (void)deferReplaceTextActionToSystem:(id)sender; // Added in rdar://118307558.
+@end
+
 #endif // HAVE(UI_ASYNC_TEXT_INTERACTION)
+
+#if HAVE(UI_CONTEXT_MENU_ASYNC_CONFIGURATION)
+
+@interface _UIContextMenuAsyncConfiguration (Staging_119442063)
+- (BOOL)fulfillUsingConfiguration:(UIContextMenuConfiguration *)configuration;
+@end
+
+#endif
+
+@interface UIResponder (Staging_118307086)
+
+- (void)addShortcut:(id)sender;
+- (void)define:(id)sender;
+- (void)promptForReplace:(id)sender;
+- (void)share:(id)sender;
+- (void)translate:(id)sender;
+- (void)transliterateChinese:(id)sender;
+
+#if HAVE(UIFINDINTERACTION)
+- (void)findSelected:(id)sender;
+#endif
+
+@end
+
+#if !defined(UI_SHIFT_KEY_STATE_ENUM)
+
+typedef NS_ENUM(NSInteger, UIShiftKeyState) {
+    UIShiftKeyStateNone = 0,
+    UIShiftKeyStateShifted,
+    UIShiftKeyStateCapsLocked
+};
+
+#endif
+
+@interface UIResponder (Internal)
+- (BOOL)_requiresKeyboardWhenFirstResponder;
+- (BOOL)_requiresKeyboardResetOnReload;
+- (UTF32Char)_characterInRelationToCaretSelection:(int)amount;
+@end
 
 WTF_EXTERN_C_BEGIN
 

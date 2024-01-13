@@ -29,10 +29,8 @@
 #if PLATFORM(COCOA)
 
 #import "ArgumentCodersCF.h"
-#import "CoreIPCData.h"
-#import "CoreIPCDate.h"
 #import "CoreIPCNSCFObject.h"
-#import "CoreIPCNumber.h"
+#import "CoreIPCTypes.h"
 #import "CoreTextHelpers.h"
 #import "DataReference.h"
 #import "LegacyGlobalSettings.h"
@@ -73,6 +71,12 @@
 #endif
 #if ENABLE(DATA_DETECTION)
 #import <pal/mac/DataDetectorsSoftLink.h>
+#endif
+#if USE(AVFOUNDATION)
+#import <pal/cocoa/AVFoundationSoftLink.h>
+#endif
+#if USE(PASSKIT)
+#import <pal/cocoa/ContactsSoftLink.h>
 #endif
 
 @interface WKSecureCodingArchivingDelegate : NSObject <NSKeyedArchiverDelegate, NSKeyedUnarchiverDelegate>
@@ -266,6 +270,33 @@ template<> Class getClass<DDScannerResult>()
 {
     return PAL::getDDScannerResultClass();
 }
+
+#if PLATFORM(MAC)
+template<> Class getClass<WKDDActionContext>()
+{
+    return PAL::getWKDDActionContextClass();
+}
+#endif
+#endif
+#if USE(AVFOUNDATION)
+template<> Class getClass<AVOutputContext>()
+{
+    return PAL::getAVOutputContextClass();
+}
+#endif
+#if USE(PASSKIT)
+template<> Class getClass<CNPhoneNumber>()
+{
+    return PAL::getCNPhoneNumberClass();
+}
+template<> Class getClass<CNPostalAddress>()
+{
+    return PAL::getCNPostalAddressClass();
+}
+template<> Class getClass<PKContact>()
+{
+    return PAL::getPKContactClass();
+}
 #endif
 
 NSType typeFromObject(id object)
@@ -273,12 +304,28 @@ NSType typeFromObject(id object)
     ASSERT(object);
 
     // Specific classes handled.
+#if USE(AVFOUNDATION)
+    if (PAL::isAVFoundationFrameworkAvailable() && [object isKindOfClass:PAL::getAVOutputContextClass()])
+        return NSType::AVOutputContext;
+#endif
     if ([object isKindOfClass:[NSArray class]])
         return NSType::Array;
+#if USE(PASSKIT)
+    if (PAL::isContactsFrameworkAvailable() && [object isKindOfClass:PAL::getCNPhoneNumberClass()])
+        return NSType::CNPhoneNumber;
+    if (PAL::isContactsFrameworkAvailable() && [object isKindOfClass:PAL::getCNPostalAddressClass()])
+        return NSType::CNPostalAddress;
+    if (PAL::isPassKitCoreFrameworkAvailable() && [object isKindOfClass:PAL::getPKContactClass()])
+        return NSType::PKContact;
+#endif
     if ([object isKindOfClass:[WebCore::CocoaColor class]])
         return NSType::Color;
 #if ENABLE(DATA_DETECTION)
-    if (PAL::isDataDetectorsCoreFrameworkAvailable() && [object isKindOfClass:[PAL::getDDScannerResultClass() class]])
+#if PLATFORM(MAC)
+    if (PAL::isDataDetectorsFrameworkAvailable() && [object isKindOfClass:PAL::getWKDDActionContextClass()])
+        return NSType::DDActionContext;
+#endif
+    if (PAL::isDataDetectorsCoreFrameworkAvailable() && [object isKindOfClass:PAL::getDDScannerResultClass()])
         return NSType::DDScannerResult;
 #endif
     if ([object isKindOfClass:[NSData class]])
@@ -291,10 +338,14 @@ NSType typeFromObject(id object)
         return NSType::Dictionary;
     if ([object isKindOfClass:[CocoaFont class]])
         return NSType::Font;
+    if ([object isKindOfClass:[NSLocale class]])
+        return NSType::Locale;
     if ([object isKindOfClass:[NSNumber class]])
         return NSType::Number;
     if ([object isKindOfClass:[NSValue class]])
         return NSType::NSValue;
+    if ([object isKindOfClass:[NSPersonNameComponents class]])
+        return NSType::PersonNameComponents;
     if ([object isKindOfClass:[NSString class]])
         return NSType::String;
     if ([object isKindOfClass:[NSURL class]])

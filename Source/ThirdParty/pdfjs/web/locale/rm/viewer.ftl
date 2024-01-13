@@ -226,6 +226,21 @@ pdfjs-find-match-diacritics-checkbox-label = Resguardar ils segns diacritics
 pdfjs-find-entire-word-checkbox-label = Pleds entirs
 pdfjs-find-reached-top = Il cumenzament dal document è cuntanschì, la tschertga cuntinuescha a la fin dal document
 pdfjs-find-reached-bottom = La fin dal document è cuntanschì, la tschertga cuntinuescha al cumenzament dal document
+# Variables:
+#   $current (Number) - the index of the currently active find result
+#   $total (Number) - the total number of matches in the document
+pdfjs-find-match-count =
+    { $total ->
+        [one] { $current } dad { $total } correspundenza
+       *[other] { $current } da { $total } correspundenzas
+    }
+# Variables:
+#   $limit (Number) - the maximum number of matches
+pdfjs-find-match-count-limit =
+    { $limit ->
+        [one] Dapli che { $limit } correspundenza
+       *[other] Dapli che { $limit } correspundenzas
+    }
 pdfjs-find-not-found = Impussibel da chattar l'expressiun
 
 ## Predefined zoom values
@@ -286,6 +301,22 @@ pdfjs-editor-ink-button-label = Dissegnar
 pdfjs-editor-stamp-button =
     .title = Agiuntar u modifitgar maletgs
 pdfjs-editor-stamp-button-label = Agiuntar u modifitgar maletgs
+pdfjs-editor-remove-button =
+    .title = Allontanar
+
+## Remove button for the various kind of editor.
+
+pdfjs-editor-remove-ink-button =
+    .title = Allontanar il dissegn
+pdfjs-editor-remove-freetext-button =
+    .title = Allontanar il text
+pdfjs-editor-remove-stamp-button =
+    .title = Allontanar la grafica
+pdfjs-editor-remove-highlight-button =
+    .title = Allontanar l'emfasa
+
+##
+
 # Editor Parameters
 pdfjs-editor-free-text-color-input = Colur
 pdfjs-editor-free-text-size-input = Grondezza
@@ -324,3 +355,30 @@ pdfjs-editor-alt-text-textarea =
 ## Editor resizers
 ## This is used in an aria label to help to understand the role of the resizer.
 
+pdfjs-editor-resizer-label-top-left = Chantun sura a sanestra — redimensiunar
+pdfjs-editor-resizer-label-top-middle = Sura amez — redimensiunar
+pdfjs-editor-resizer-label-top-right = Chantun sura a dretga — redimensiunar
+pdfjs-editor-resizer-label-middle-right = Da vart dretga amez — redimensiunar
+pdfjs-editor-resizer-label-bottom-right = Chantun sut a dretga — redimensiunar
+pdfjs-editor-resizer-label-bottom-middle = Sutvart amez — redimensiunar
+pdfjs-editor-resizer-label-bottom-left = Chantun sut a sanestra — redimensiunar
+pdfjs-editor-resizer-label-middle-left = Vart sanestra amez — redimensiunar
+
+## Color picker
+
+# This means "Color used to highlight text"
+pdfjs-editor-highlight-colorpicker-label = Colur per l'emfasa
+pdfjs-editor-colorpicker-button =
+    .title = Midar la colur
+pdfjs-editor-colorpicker-dropdown =
+    .aria-label = Colurs disponiblas
+pdfjs-editor-colorpicker-yellow =
+    .title = Mellen
+pdfjs-editor-colorpicker-green =
+    .title = Verd
+pdfjs-editor-colorpicker-blue =
+    .title = Blau
+pdfjs-editor-colorpicker-pink =
+    .title = Rosa
+pdfjs-editor-colorpicker-red =
+    .title = Cotschen

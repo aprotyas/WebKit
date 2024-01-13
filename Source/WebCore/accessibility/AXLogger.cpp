@@ -176,6 +176,16 @@ void AXLogger::log(AccessibilityObjectInclusion inclusion)
     LOG(Accessibility, "%s", stream.release().utf8().data());
 }
 
+void AXLogger::log(AXRelationType relationType)
+{
+    if (!shouldLog())
+        return;
+
+    TextStream stream(TextStream::LineMode::SingleLine);
+    stream.dumpProperty("RelationType", relationType);
+    LOG(Accessibility, "%s", stream.release().utf8().data());
+}
+
 #if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
 void AXLogger::log(AXIsolatedTree& tree)
 {
@@ -506,8 +516,8 @@ TextStream& operator<<(TextStream& stream, AXRelationType relationType)
     case AXRelationType::HeaderFor:
         stream << "HeaderFor";
         break;
-    case AXRelationType::LabelledBy:
-        stream << "LabelledBy";
+    case AXRelationType::LabeledBy:
+        stream << "LabeledBy";
         break;
     case AXRelationType::LabelFor:
         stream << "LabelFor";
@@ -559,6 +569,9 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
     case AXObjectCache::AXNotification::AXColumnSpanChanged:
         stream << "AXColumnSpanChanged";
         break;
+    case AXObjectCache::AXNotification::AXContentEditableAttributeChanged:
+        stream << "AXContentEditableAttributeChanged";
+        break;
     case AXObjectCache::AXNotification::AXControlledObjectsChanged:
         stream << "AXControlledObjectsChanged";
         break;
@@ -606,6 +619,9 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
         break;
     case AXObjectCache::AXNotification::AXKeyShortcutsChanged:
         stream << "AXKeyShortcutsChanged";
+        break;
+    case AXObjectCache::AXNotification::AXLabelChanged:
+        stream << "AXLabelChanged";
         break;
     case AXObjectCache::AXNotification::AXLanguageChanged:
         stream << "AXLanguageChanged";
@@ -693,9 +709,6 @@ TextStream& operator<<(TextStream& stream, AXObjectCache::AXNotification notific
         break;
     case AXObjectCache::AXNotification::AXScrolledToAnchor:
         stream << "AXScrolledToAnchor";
-        break;
-    case AXObjectCache::AXNotification::AXLabelCreated:
-        stream << "AXLabelCreated";
         break;
     case AXObjectCache::AXNotification::AXLiveRegionCreated:
         stream << "AXLiveRegionCreated";

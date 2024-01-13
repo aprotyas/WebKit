@@ -46,6 +46,11 @@
 #include "PlatformDisplayLibWPE.h"
 #endif
 
+#if PLATFORM(WPE)
+#include "PlatformDisplayGBM.h"
+#include "PlatformDisplaySurfaceless.h"
+#endif
+
 #if PLATFORM(GTK)
 #include "GtkVersioning.h"
 #endif
@@ -71,7 +76,7 @@
 
 #if USE(EGL)
 #if USE(LIBEPOXY)
-#include "EpoxyEGL.h"
+#include <epoxy/egl.h>
 #else
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -118,6 +123,10 @@ typedef EGLBoolean (*PFNEGLDESTROYIMAGEKHRPROC) (EGLDisplay, EGLImageKHR);
 
 namespace WebCore {
 
+#if PLATFORM(WPE)
+bool PlatformDisplay::s_useDMABufForRendering = false;
+#endif
+
 std::unique_ptr<PlatformDisplay> PlatformDisplay::createPlatformDisplay()
 {
 #if PLATFORM(GTK)
@@ -150,6 +159,16 @@ std::unique_ptr<PlatformDisplay> PlatformDisplay::createPlatformDisplay()
     return PlatformDisplayWayland::create(nullptr);
 #elif PLATFORM(X11)
     return PlatformDisplayX11::create(nullptr);
+#endif
+
+#if PLATFORM(WPE)
+    if (s_useDMABufForRendering) {
+        if (GBMDevice::singleton().isInitialized()) {
+            if (auto* device = GBMDevice::singleton().device())
+                return PlatformDisplayGBM::create(device);
+        }
+        return PlatformDisplaySurfaceless::create();
+    }
 #endif
 
 #if USE(WPE_RENDERER)
@@ -557,16 +576,16 @@ const Vector<PlatformDisplay::DMABufFormat>& PlatformDisplay::dmabufFormats()
             reinterpret_cast<PFNEGLQUERYDMABUFMODIFIERSEXTPROC>(eglGetProcAddress("eglQueryDmaBufModifiersEXT")) : nullptr;
 
         // For now we only support formats that can be created with a single GBM buffer for all planes.
-        static const Vector<uint32_t> s_supportedFormats = {
+        static const Vector<EGLint> s_supportedFormats = {
+            DRM_FORMAT_ARGB8888, DRM_FORMAT_RGBA8888, DRM_FORMAT_ABGR8888, DRM_FORMAT_BGRA8888,
+            DRM_FORMAT_XRGB8888, DRM_FORMAT_RGBX8888, DRM_FORMAT_XBGR8888, DRM_FORMAT_BGRX8888,
             DRM_FORMAT_RGB565,
-            DRM_FORMAT_RGBX8888, DRM_FORMAT_RGBA8888, DRM_FORMAT_BGRX8888, DRM_FORMAT_BGRA8888,
-            DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888, DRM_FORMAT_XBGR8888, DRM_FORMAT_ABGR8888,
-            DRM_FORMAT_XRGB2101010, DRM_FORMAT_ARGB2101010, DRM_FORMAT_XBGR2101010, DRM_FORMAT_ABGR2101010,
-            DRM_FORMAT_XRGB16161616F, DRM_FORMAT_ARGB16161616F, DRM_FORMAT_XBGR16161616F, DRM_FORMAT_ABGR16161616F
+            DRM_FORMAT_ARGB2101010, DRM_FORMAT_ABGR2101010, DRM_FORMAT_XRGB2101010, DRM_FORMAT_XBGR2101010,
+            DRM_FORMAT_ARGB16161616F, DRM_FORMAT_ABGR16161616F, DRM_FORMAT_XRGB16161616F, DRM_FORMAT_XBGR16161616F
         };
 
-        m_dmabufFormats = WTF::compactMap(formats, [this](auto format) -> std::optional<DMABufFormat> {
-            if (!s_supportedFormats.contains(static_cast<uint32_t>(format)))
+        m_dmabufFormats = WTF::compactMap(s_supportedFormats, [&](auto format) -> std::optional<DMABufFormat> {
+            if (!formats.contains(format))
                 return std::nullopt;
 
             Vector<uint64_t, 1> dmabufModifiers = { DRM_FORMAT_MOD_INVALID };

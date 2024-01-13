@@ -83,8 +83,8 @@ public:
     const Element* elementAt(unsigned) const;
 
     void initElementSegment(uint32_t tableIndex, const Element& segment, uint32_t dstOffset, uint32_t srcOffset, uint32_t length);
-    template<typename T> bool copyDataSegment(uint32_t segmentIndex, uint32_t offset, uint32_t lengthInBytes, FixedVector<T>& values);
-    void copyElementSegment(const Element& segment, uint32_t srcOffset, uint32_t length, FixedVector<uint64_t>& values);
+    bool copyDataSegment(uint32_t segmentIndex, uint32_t offset, uint32_t lengthInBytes, uint8_t* values);
+    void copyElementSegment(const Element& segment, uint32_t srcOffset, uint32_t length, uint64_t* values);
 
     bool isImportFunction(uint32_t functionIndex) const
     {
@@ -248,6 +248,9 @@ private:
     {
         return roundUpToMultipleOf<sizeof(Global::Value)>(offsetOfTail() + sizeof(ImportFunctionInfo) * numImportFunctions + sizeof(Table*) * numTables) + sizeof(Global::Value) * numGlobals;
     }
+
+    bool evaluateConstantExpression(uint64_t, Type, uint64_t&);
+
     VM* m_vm;
     void* m_softStackLimit { nullptr };
     JSWebAssemblyInstance* m_owner { nullptr };

@@ -58,7 +58,7 @@ namespace Style {
 class Scope;
 }
 
-class CSSStyleSheet final : public StyleSheet, public CanMakeCheckedPtr {
+class CSSStyleSheet final : public StyleSheet, public CanMakeSingleThreadWeakPtr<CSSStyleSheet> {
 public:
     struct Init {
         String baseURL;
@@ -173,6 +173,7 @@ private:
 
     bool isCSSStyleSheet() const final { return true; }
     String type() const final { return cssContentTypeAtom(); }
+    RefPtr<CSSRuleList> cssRulesSkippingAccessCheck();
 
     Ref<StyleSheetContents> m_contents;
     bool m_isInlineStylesheet { false };
@@ -186,7 +187,7 @@ private:
     WeakPtr<Document, WeakPtrImplWithEventTargetData> m_constructorDocument;
     WeakHashSet<ContainerNode, WeakPtrImplWithEventTargetData> m_adoptingTreeScopes;
 
-    CheckedPtr<Node> m_ownerNode;
+    WeakPtr<Node, WeakPtrImplWithEventTargetData> m_ownerNode;
     WeakPtr<CSSImportRule> m_ownerRule;
 
     TextPosition m_startPosition;

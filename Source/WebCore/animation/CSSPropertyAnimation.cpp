@@ -58,6 +58,7 @@
 #include "RenderBox.h"
 #include "RenderStyleSetters.h"
 #include "SVGRenderStyle.h"
+#include "ScopedName.h"
 #include "ScrollbarGutter.h"
 #include "Settings.h"
 #include "StyleCachedImage.h"
@@ -196,7 +197,8 @@ static inline TransformOperations blendFunc(const TransformOperations& from, con
         return context.client.transformFunctionListPrefix();
     };
 
-    auto boxSize = is<RenderBox>(context.client.renderer()) ? downcast<RenderBox>(*context.client.renderer()).borderBoxRect().size() : LayoutSize();
+    auto* renderBox = dynamicDowncast<RenderBox>(context.client.renderer());
+    auto boxSize = renderBox ? renderBox->borderBoxRect().size() : LayoutSize();
     return to.blend(from, context, boxSize, prefix());
 }
 
@@ -229,10 +231,8 @@ static RefPtr<ScaleTransformOperation> blendFunc(ScaleTransformOperation* from, 
     }
 
     auto blendedOperation = to->blend(from, context);
-    if (is<ScaleTransformOperation>(blendedOperation)) {
-        auto& scale = downcast<ScaleTransformOperation>(blendedOperation.get());
-        return ScaleTransformOperation::create(scale.x(), scale.y(), scale.z(), scale.type());
-    }
+    if (auto* scale = dynamicDowncast<ScaleTransformOperation>(blendedOperation.get()))
+        return ScaleTransformOperation::create(scale->x(), scale->y(), scale->z(), scale->type());
     return nullptr;
 }
 
@@ -265,10 +265,8 @@ static RefPtr<RotateTransformOperation> blendFunc(RotateTransformOperation* from
     }
 
     auto blendedOperation = to->blend(from, context);
-    if (is<RotateTransformOperation>(blendedOperation)) {
-        auto& rotate = downcast<RotateTransformOperation>(blendedOperation.get());
-        return RotateTransformOperation::create(rotate.x(), rotate.y(), rotate.z(), rotate.angle(), rotate.type());
-    }
+    if (auto* rotate = dynamicDowncast<RotateTransformOperation>(blendedOperation.get()))
+        return RotateTransformOperation::create(rotate->x(), rotate->y(), rotate->z(), rotate->angle(), rotate->type());
     return nullptr;
 }
 
@@ -301,10 +299,8 @@ static RefPtr<TranslateTransformOperation> blendFunc(TranslateTransformOperation
     }
 
     Ref<TransformOperation> blendedOperation = to->blend(from, context);
-    if (is<TranslateTransformOperation>(blendedOperation)) {
-        TranslateTransformOperation& translate = downcast<TranslateTransformOperation>(blendedOperation.get());
-        return TranslateTransformOperation::create(translate.x(), translate.y(), translate.z(), translate.type());
-    }
+    if (auto* translate = dynamicDowncast<TranslateTransformOperation>(blendedOperation.get()))
+        return TranslateTransformOperation::create(translate->x(), translate->y(), translate->z(), translate->type());
     return nullptr;
 }
 
@@ -346,6 +342,21 @@ static inline RefPtr<StyleImage> blendFilter(RefPtr<StyleImage> inputImage, cons
 {
     auto filterResult = from.blend(to, context);
     return StyleFilterImage::create(WTFMove(inputImage), WTFMove(filterResult));
+}
+
+static inline ContentVisibility blendFunc(ContentVisibility from, ContentVisibility to, const CSSPropertyBlendingContext& context)
+{
+    // https://drafts.csswg.org/css-contain-3/#content-visibility-animation
+    // In general, the content-visibility property's animation type is discrete. However, similar to interpolation of
+    // visibility, during interpolation between hidden and any other content-visibility value, p values between 0 and 1
+    // map to the non-hidden value.
+    if (from != ContentVisibility::Hidden && to != ContentVisibility::Hidden)
+        return context.progress < 0.5 ? from : to;
+    if (context.progress <= 0)
+        return from;
+    if (context.progress >= 1)
+        return to;
+    return from == ContentVisibility::Hidden ? to : from;
 }
 
 static inline Visibility blendFunc(Visibility from, Visibility to, const CSSPropertyBlendingContext& context)
@@ -434,38 +445,32 @@ static inline RefPtr<StyleImage> blendFunc(StyleImage* from, StyleImage* to, con
         return to;
 
     // Animation between two generated images. Cross fade for all other cases.
-    if (is<StyleFilterImage>(*from) && is<StyleFilterImage>(*to)) {
+    if (auto [fromFilter, toFilter] = std::tuple { dynamicDowncast<StyleFilterImage>(*from), dynamicDowncast<StyleFilterImage>(*to) }; fromFilter && toFilter) {
         // Animation of generated images just possible if input images are equal.
         // Otherwise fall back to cross fade animation.
-        auto& fromFilter = downcast<StyleFilterImage>(*from);
-        auto& toFilter = downcast<StyleFilterImage>(*to);
-
-        if (fromFilter.equalInputImages(toFilter) && is<StyleCachedImage>(fromFilter.inputImage()))
-            return blendFilter(fromFilter.inputImage(), fromFilter.filterOperations(), toFilter.filterOperations(), context);
-    } else if (is<StyleCrossfadeImage>(*from) && is<StyleCrossfadeImage>(*to)) {
-        auto& fromCrossfade = downcast<StyleCrossfadeImage>(*from);
-        auto& toCrossfade = downcast<StyleCrossfadeImage>(*to);
-
-        if (fromCrossfade.equalInputImages(toCrossfade)) {
-            if (auto crossfadeBlend = toCrossfade.blend(fromCrossfade, context))
+        if (fromFilter->equalInputImages(*toFilter) && is<StyleCachedImage>(fromFilter->inputImage()))
+            return blendFilter(fromFilter->inputImage(), fromFilter->filterOperations(), toFilter->filterOperations(), context);
+    } else if (auto [fromCrossfade, toCrossfade] = std::tuple { dynamicDowncast<StyleCrossfadeImage>(*from), dynamicDowncast<StyleCrossfadeImage>(*to) }; fromCrossfade && toCrossfade) {
+        if (fromCrossfade->equalInputImages(*toCrossfade)) {
+            if (auto crossfadeBlend = toCrossfade->blend(*fromCrossfade, context))
                 return crossfadeBlend;
         }
-    } else if (is<StyleFilterImage>(*from) && is<StyleCachedImage>(*to)) {
-        auto& fromFilter = downcast<StyleFilterImage>(*from);
-        auto fromFilterInputImage = fromFilter.inputImage();
+    } else if (auto [fromFilter, toCachedImage] = std::tuple { dynamicDowncast<StyleFilterImage>(*from), dynamicDowncast<StyleCachedImage>(*to) }; fromFilter && toCachedImage) {
+        RefPtr fromFilterInputImage = dynamicDowncast<StyleCachedImage>(fromFilter->inputImage());
 
-        if (is<StyleCachedImage>(fromFilterInputImage) && downcast<StyleCachedImage>(*to).equals(downcast<StyleCachedImage>(*fromFilterInputImage)))
-            return blendFilter(WTFMove(fromFilterInputImage), fromFilter.filterOperations(), FilterOperations(), context);
-    } else if (is<StyleCachedImage>(*from) && is<StyleFilterImage>(*to)) {
-        auto& toFilter = downcast<StyleFilterImage>(*to);
-        auto toFilterInputImage = toFilter.inputImage();
+        if (fromFilterInputImage && toCachedImage->equals(*fromFilterInputImage))
+            return blendFilter(WTFMove(fromFilterInputImage), fromFilter->filterOperations(), FilterOperations(), context);
+    } else if (auto [fromCachedImage, toFilter] = std::tuple { dynamicDowncast<StyleCachedImage>(*from), dynamicDowncast<StyleFilterImage>(*to) }; fromCachedImage && toFilter) {
+        RefPtr toFilterInputImage = dynamicDowncast<StyleCachedImage>(toFilter->inputImage());
 
-        if (is<StyleCachedImage>(toFilterInputImage) && downcast<StyleCachedImage>(*from).equals(downcast<StyleCachedImage>(*toFilterInputImage)))
-            return blendFilter(WTFMove(toFilterInputImage), FilterOperations(), toFilter.filterOperations(), context);
+        if (toFilterInputImage && fromCachedImage->equals(*toFilterInputImage))
+            return blendFilter(WTFMove(toFilterInputImage), FilterOperations(), toFilter->filterOperations(), context);
     }
 
-    if (is<StyleCachedImage>(*from) && is<StyleCachedImage>(*to))
-        return crossfadeBlend(downcast<StyleCachedImage>(*from), downcast<StyleCachedImage>(*to), context);
+    auto* fromCachedImage = dynamicDowncast<StyleCachedImage>(*from);
+    auto* toCachedImage = dynamicDowncast<StyleCachedImage>(*to);
+    if (fromCachedImage && toCachedImage)
+        return crossfadeBlend(*fromCachedImage, *toCachedImage, context);
 
     // FIXME: Add support for animation between two *gradient() functions.
     // https://bugs.webkit.org/show_bug.cgi?id=119956
@@ -1462,10 +1467,8 @@ private:
     bool animationIsAccelerated(const Settings&) const final
     {
         return property() == CSSPropertyFilter
-#if ENABLE(FILTERS_LEVEL_2)
             || property() == CSSPropertyBackdropFilter
             || property() == CSSPropertyWebkitBackdropFilter
-#endif
             ;
     }
 
@@ -3681,8 +3684,8 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new LineHeightWrapper,
         new PropertyWrapper<float>(CSSPropertyOutlineOffset, &RenderStyle::outlineOffset, &RenderStyle::setOutlineOffset),
         new FloatPropertyWrapper(CSSPropertyOutlineWidth, &RenderStyle::outlineWidth, &RenderStyle::setOutlineWidth, FloatPropertyWrapper::ValueRange::NonNegative),
-        new PropertyWrapper<float>(CSSPropertyLetterSpacing, &RenderStyle::letterSpacing, &RenderStyle::setLetterSpacing),
-        new LengthPropertyWrapper(CSSPropertyWordSpacing, &RenderStyle::wordSpacing, &RenderStyle::setWordSpacing, LengthPropertyWrapper::Flags::IsLengthPercentage),
+        new LengthPropertyWrapper(CSSPropertyLetterSpacing, &RenderStyle::computedLetterSpacing, &RenderStyle::setLetterSpacing, LengthPropertyWrapper::Flags::IsLengthPercentage),
+        new LengthPropertyWrapper(CSSPropertyWordSpacing, &RenderStyle::computedWordSpacing, &RenderStyle::setWordSpacing, LengthPropertyWrapper::Flags::IsLengthPercentage),
         new TextIndentWrapper,
         new VerticalAlignWrapper,
 
@@ -3708,10 +3711,8 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new AcceleratedIndividualTransformPropertyWrapper<TranslateTransformOperation>(CSSPropertyTranslate, &RenderStyle::translate, &RenderStyle::setTranslate),
 
         new PropertyWrapperFilter(CSSPropertyFilter, &RenderStyle::filter, &RenderStyle::setFilter),
-#if ENABLE(FILTERS_LEVEL_2)
         new PropertyWrapperFilter(CSSPropertyBackdropFilter, &RenderStyle::backdropFilter, &RenderStyle::setBackdropFilter),
         new PropertyWrapperFilter(CSSPropertyWebkitBackdropFilter, &RenderStyle::backdropFilter, &RenderStyle::setBackdropFilter),
-#endif
         new PropertyWrapperFilter(CSSPropertyAppleColorFilter, &RenderStyle::appleColorFilter, &RenderStyle::setAppleColorFilter),
 
         new PathOperationPropertyWrapper(CSSPropertyClipPath, &RenderStyle::clipPath, &RenderStyle::setClipPath),
@@ -3813,6 +3814,7 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new DiscretePropertyWrapper<PrintColorAdjust>(CSSPropertyPrintColorAdjust, &RenderStyle::printColorAdjust, &RenderStyle::setPrintColorAdjust),
         new DiscretePropertyWrapper<ColumnFill>(CSSPropertyColumnFill, &RenderStyle::columnFill, &RenderStyle::setColumnFill),
         new DiscretePropertyWrapper<BorderStyle>(CSSPropertyColumnRuleStyle, &RenderStyle::columnRuleStyle, &RenderStyle::setColumnRuleStyle),
+        new PropertyWrapper<ContentVisibility>(CSSPropertyContentVisibility, &RenderStyle::contentVisibility, &RenderStyle::setContentVisibility),
         new DiscretePropertyWrapper<CursorType>(CSSPropertyCursor, &RenderStyle::cursor, &RenderStyle::setCursor),
         new DiscretePropertyWrapper<EmptyCell>(CSSPropertyEmptyCells, &RenderStyle::emptyCells, &RenderStyle::setEmptyCells),
         new DiscretePropertyWrapper<FlexDirection>(CSSPropertyFlexDirection, &RenderStyle::flexDirection, &RenderStyle::setFlexDirection),
@@ -3872,14 +3874,10 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new DiscretePropertyWrapper<TextSpacingTrim>(CSSPropertyTextSpacingTrim, &RenderStyle::textSpacingTrim, &RenderStyle::setTextSpacingTrim),
         new DiscretePropertyWrapper<TextAutospace>(CSSPropertyTextAutospace, &RenderStyle::textAutospace, &RenderStyle::setTextAutospace),
 
-#if ENABLE(CSS_BOX_DECORATION_BREAK)
         new DiscretePropertyWrapper<BoxDecorationBreak>(CSSPropertyWebkitBoxDecorationBreak, &RenderStyle::boxDecorationBreak, &RenderStyle::setBoxDecorationBreak),
-#endif
-#if ENABLE(CSS_COMPOSITING)
         new DiscretePropertyWrapper<Isolation>(CSSPropertyIsolation, &RenderStyle::isolation, &RenderStyle::setIsolation),
         new DiscretePropertyWrapper<BlendMode>(CSSPropertyMixBlendMode, &RenderStyle::blendMode, &RenderStyle::setBlendMode),
         new DiscretePropertyWrapper<BlendMode>(CSSPropertyBackgroundBlendMode, &RenderStyle::backgroundBlendMode, &RenderStyle::setBackgroundBlendMode),
-#endif
 #if ENABLE(DARK_MODE_CSS)
         new DiscretePropertyWrapper<StyleColorScheme>(CSSPropertyColorScheme, &RenderStyle::colorScheme, &RenderStyle::setColorScheme),
 #endif
@@ -3929,7 +3927,8 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         new DiscreteSVGPropertyWrapper<const String&>(CSSPropertyMarkerMid, &SVGRenderStyle::markerMidResource, &SVGRenderStyle::setMarkerMidResource),
         new DiscreteSVGPropertyWrapper<const String&>(CSSPropertyMarkerStart, &SVGRenderStyle::markerStartResource, &SVGRenderStyle::setMarkerStartResource),
         new DiscretePropertyWrapper<const ScrollbarGutter>(CSSPropertyScrollbarGutter, &RenderStyle::scrollbarGutter, &RenderStyle::setScrollbarGutter),
-        new DiscretePropertyWrapper<ScrollbarWidth>(CSSPropertyScrollbarWidth, &RenderStyle::scrollbarWidth, &RenderStyle::setScrollbarWidth)
+        new DiscretePropertyWrapper<ScrollbarWidth>(CSSPropertyScrollbarWidth, &RenderStyle::scrollbarWidth, &RenderStyle::setScrollbarWidth),
+        new DiscretePropertyWrapper<std::optional<Style::ScopedName>>(CSSPropertyViewTransitionName, &RenderStyle::viewTransitionName, &RenderStyle::setViewTransitionName)
     };
     const unsigned animatableLonghandPropertiesCount = std::size(animatableLonghandPropertyWrappers);
 
@@ -4030,7 +4029,6 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
 #endif
         case CSSPropertyWebkitTextZoom:
         case CSSPropertyAlignmentBaseline:
-        case CSSPropertyAlt:
         case CSSPropertyAnimation:
         case CSSPropertyAnimationComposition:
         case CSSPropertyAnimationDelay:
@@ -4040,6 +4038,7 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         case CSSPropertyAnimationIterationCount:
         case CSSPropertyAnimationName:
         case CSSPropertyAnimationPlayState:
+        case CSSPropertyAnimationTimeline:
         case CSSPropertyAnimationTimingFunction:
         case CSSPropertyAppearance:
         case CSSPropertyBlockStepInsert:
@@ -4060,7 +4059,6 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         case CSSPropertyContainer:
         case CSSPropertyContainerName:
         case CSSPropertyContainerType:
-        case CSSPropertyContentVisibility:
         case CSSPropertyFlex:
         case CSSPropertyFlexFlow:
         case CSSPropertyGap:
@@ -4129,6 +4127,9 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         case CSSPropertyScrollSnapAlign:
         case CSSPropertyScrollSnapStop:
         case CSSPropertyScrollSnapType:
+        case CSSPropertyScrollTimeline:
+        case CSSPropertyScrollTimelineAxis:
+        case CSSPropertyScrollTimelineName:
         case CSSPropertyTextBoxEdge:
         case CSSPropertySize:
         case CSSPropertySpeakAs:
@@ -4138,11 +4139,16 @@ CSSPropertyAnimationWrapperMap::CSSPropertyAnimationWrapperMap()
         case CSSPropertyTextDecorationSkip:
         case CSSPropertyTextUnderlinePosition:
         case CSSPropertyTransition:
+        case CSSPropertyTransitionBehavior:
         case CSSPropertyTransitionDelay:
         case CSSPropertyTransitionDuration:
         case CSSPropertyTransitionProperty:
         case CSSPropertyTransitionTimingFunction:
         case CSSPropertyUnicodeBidi:
+        case CSSPropertyViewTimeline:
+        case CSSPropertyViewTimelineAxis:
+        case CSSPropertyViewTimelineInset: // FIXME: view-timeline-inset should be animabale (bug 265690)
+        case CSSPropertyViewTimelineName:
         case CSSPropertyWillChange:
 #if ENABLE(APPLE_PAY)
         case CSSPropertyApplePayButtonStyle:

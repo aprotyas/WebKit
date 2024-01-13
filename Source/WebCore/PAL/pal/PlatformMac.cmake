@@ -69,9 +69,6 @@ list(APPEND PAL_PUBLIC_HEADERS
     spi/cocoa/IOKitSPI.h
     spi/cocoa/IOPMLibSPI.h
     spi/cocoa/IOPSLibSPI.h
-    spi/cocoa/IOReturnSPI.h
-    spi/cocoa/IOSurfaceSPI.h
-    spi/cocoa/IOTypesSPI.h
     spi/cocoa/LaunchServicesSPI.h
     spi/cocoa/LinkPresentationSPI.h
     spi/cocoa/MediaToolboxSPI.h
@@ -98,6 +95,7 @@ list(APPEND PAL_PUBLIC_HEADERS
     spi/cocoa/PassKitSPI.h
     spi/cocoa/QuartzCoreSPI.h
     spi/cocoa/RevealSPI.h
+    spi/cocoa/SQLite3SPI.h
     spi/cocoa/SceneKitSPI.h
     spi/cocoa/SecKeyProxySPI.h
     spi/cocoa/ServersSPI.h
@@ -143,6 +141,7 @@ list(APPEND PAL_PUBLIC_HEADERS
     spi/mac/NSSpellCheckerSPI.h
     spi/mac/NSTextFinderSPI.h
     spi/mac/NSTextInputContextSPI.h
+    spi/mac/NSTextTableSPI.h
     spi/mac/NSUndoManagerSPI.h
     spi/mac/NSViewSPI.h
     spi/mac/NSWindowSPI.h

@@ -71,6 +71,7 @@
 #include <wtf/SetForScope.h>
 #include <wtf/StackPointer.h>
 #include <wtf/Stopwatch.h>
+#include <wtf/TZoneMalloc.h>
 #include <wtf/ThreadSafeRefCounted.h>
 #include <wtf/ThreadSafeWeakHashSet.h>
 #include <wtf/UniqueArray.h>
@@ -106,6 +107,7 @@ class BuiltinExecutables;
 class BytecodeIntrinsicRegistry;
 class CallFrame;
 enum class CallMode;
+enum class CommonJITThunkID : uint8_t;
 struct CheckpointOSRExitSideState;
 class CodeBlock;
 class CodeCache;
@@ -173,7 +175,7 @@ struct EntryFrame;
 
 class MicrotaskQueue;
 class QueuedTask {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(QueuedTask);
     friend class MicrotaskQueue;
 public:
     static constexpr unsigned maxArguments = 4;
@@ -196,7 +198,7 @@ private:
 };
 
 class MicrotaskQueue {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_TZONE_ALLOCATED(MicrotaskQueue);
     WTF_MAKE_NONCOPYABLE(MicrotaskQueue);
 public:
     MicrotaskQueue() = default;
@@ -269,11 +271,7 @@ struct ScratchBuffer {
         size_t m_activeLength;
         double pad; // Make sure m_buffer is double aligned.
     } u;
-#if CPU(MIPS) && (defined WTF_MIPS_ARCH_REV && WTF_MIPS_ARCH_REV == 2)
-    alignas(8) void* m_buffer[0];
-#else
     void* m_buffer[0];
-#endif
 };
 #if COMPILER(MSVC)
 #pragma warning(pop)
@@ -675,6 +673,7 @@ public:
 #if ENABLE(JIT)
     std::unique_ptr<JITThunks> jitStubs;
     MacroAssemblerCodeRef<JITThunkPtrTag> getCTIStub(ThunkGenerator);
+    MacroAssemblerCodeRef<JITThunkPtrTag> getCTIStub(CommonJITThunkID);
     std::unique_ptr<SharedJITStubSet> m_sharedJITStubs;
 #endif
 #if ENABLE(FTL_JIT)

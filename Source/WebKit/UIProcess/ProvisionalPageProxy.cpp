@@ -28,6 +28,7 @@
 
 #include "APINavigation.h"
 #include "APIWebsitePolicies.h"
+#include "BrowsingContextGroup.h"
 #include "DrawingAreaProxy.h"
 #include "FormDataReference.h"
 #include "GoToBackForwardItemParameters.h"
@@ -35,6 +36,7 @@
 #include "LocalFrameCreationParameters.h"
 #include "Logging.h"
 #include "MessageSenderInlines.h"
+#include "NavigationActionPolicyParameters.h"
 #include "PageClient.h"
 #include "RemotePageProxy.h"
 #include "SuspendedPageProxy.h"
@@ -104,6 +106,8 @@ ProvisionalPageProxy::ProvisionalPageProxy(WebPageProxy& page, Ref<WebProcessPro
         ASSERT(&suspendedPage->process() == m_process.ptr());
         suspendedPage->unsuspend();
         m_mainFrame = &suspendedPage->mainFrame();
+        m_browsingContextGroup = &suspendedPage->browsingContextGroup();
+        m_remotePageProxyState = suspendedPage->takeRemotePageProxyState();
     }
 
     initializeWebPage(websitePolicies);
@@ -123,7 +127,7 @@ ProvisionalPageProxy::~ProvisionalPageProxy()
 
         auto dataStore = m_process->websiteDataStore();
         if (dataStore && dataStore!= &m_page->websiteDataStore())
-            m_process->processPool().pageEndUsingWebsiteDataStore(CheckedRef { m_page }, *dataStore);
+            m_process->processPool().pageEndUsingWebsiteDataStore(Ref { m_page.get() }, *dataStore);
 
         if (m_process->hasConnection())
             send(Messages::WebPage::Close());
@@ -191,7 +195,7 @@ void ProvisionalPageProxy::cancel()
 
 void ProvisionalPageProxy::initializeWebPage(RefPtr<API::WebsitePolicies>&& websitePolicies)
 {
-    m_drawingArea = m_page->pageClient().createDrawingAreaProxy();
+    m_drawingArea = m_page->pageClient().createDrawingAreaProxy(m_process.copyRef());
 
     bool sendPageCreationParameters { true };
     auto parameters = m_page->creationParameters(m_process, *m_drawingArea, WTFMove(websitePolicies));
@@ -329,7 +333,12 @@ void ProvisionalPageProxy::didCreateMainFrame(FrameIdentifier frameID)
     // If we are process swapping in response to a server redirect then that notification will not come from the new WebContent process.
     // In this case we have the UIProcess synthesize the redirect notification at the appropriate time.
     if (m_isServerRedirect) {
-        m_mainFrame->frameLoadState().didStartProvisionalLoad(m_request.url());
+        // FIXME: When <rdar://116203552> is fixed we should not need this case here
+        // because main frame redirect messages won't come from the web content process.
+        if (m_page->preferences().siteIsolationEnabled() && !m_mainFrame->frameLoadState().provisionalURL().isEmpty())
+            m_mainFrame->frameLoadState().didReceiveServerRedirectForProvisionalLoad(m_request.url());
+        else
+            m_mainFrame->frameLoadState().didStartProvisionalLoad(m_request.url());
         m_page->didReceiveServerRedirectForProvisionalLoadForFrameShared(m_process.copyRef(), m_mainFrame->frameID(), m_navigationID, WTFMove(m_request), { });
     } else if (previousMainFrame && !previousMainFrame->provisionalURL().isEmpty()) {
         // In case of a process swap after response policy, the didStartProvisionalLoad already happened but the new main frame doesn't know about it
@@ -431,12 +440,12 @@ void ProvisionalPageProxy::didChangeProvisionalURLForFrame(FrameIdentifier frame
     m_page->didChangeProvisionalURLForFrameShared(m_process.copyRef(), frameID, navigationID, WTFMove(url));
 }
 
-void ProvisionalPageProxy::decidePolicyForNavigationActionAsync(FrameInfoData&& frameInfo, uint64_t navigationID, NavigationActionData&& navigationActionData, FrameInfoData&& originatingFrameInfo, std::optional<WebPageProxyIdentifier> originatingPageID, const WebCore::ResourceRequest& originalRequest, WebCore::ResourceRequest&& request, IPC::FormDataReference&& requestBody, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
+void ProvisionalPageProxy::decidePolicyForNavigationActionAsync(NavigationActionPolicyParameters&& parameters, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
 {
-    if (!validateInput(frameInfo.frameID, navigationID))
+    if (!validateInput(parameters.frameInfo.frameID, parameters.navigationID))
         return completionHandler({ });
 
-    m_page->decidePolicyForNavigationActionAsyncShared(m_process.copyRef(), m_webPageID, WTFMove(frameInfo), navigationID, WTFMove(navigationActionData), WTFMove(originatingFrameInfo), originatingPageID, originalRequest, WTFMove(request), WTFMove(requestBody), WTFMove(completionHandler));
+    m_page->decidePolicyForNavigationActionAsyncShared(m_process.copyRef(), m_webPageID, WTFMove(parameters), WTFMove(completionHandler));
 }
 
 void ProvisionalPageProxy::decidePolicyForResponse(FrameInfoData&& frameInfo, uint64_t navigationID, const WebCore::ResourceResponse& response, const WebCore::ResourceRequest& request, bool canShowMIMEType, const String& downloadAttribute, CompletionHandler<void(PolicyDecision&&)>&& completionHandler)
@@ -473,8 +482,10 @@ void ProvisionalPageProxy::backForwardGoToItem(const WebCore::BackForwardItemIde
     m_page->backForwardGoToItemShared(m_process.copyRef(), identifier, WTFMove(completionHandler));
 }
 
-void ProvisionalPageProxy::decidePolicyForNavigationActionSync(FrameInfoData&& frameInfo, uint64_t navigationID, NavigationActionData&& navigationActionData, FrameInfoData&& originatingFrameInfo, std::optional<WebPageProxyIdentifier> originatingPageID, const WebCore::ResourceRequest& originalRequest, WebCore::ResourceRequest&& request, IPC::FormDataReference&& requestBody, CompletionHandler<void(PolicyDecision&&)>&& reply)
+void ProvisionalPageProxy::decidePolicyForNavigationActionSync(NavigationActionPolicyParameters&& parameters, CompletionHandler<void(PolicyDecision&&)>&& reply)
 {
+    auto& frameInfo = parameters.frameInfo;
+    auto navigationID = parameters.navigationID;
     if (!frameInfo.isMainFrame || (m_mainFrame && m_mainFrame->frameID() != frameInfo.frameID) || navigationID != m_navigationID) {
         reply(PolicyDecision { std::nullopt, WebCore::PolicyAction::Ignore, navigationID });
         return;
@@ -486,7 +497,7 @@ void ProvisionalPageProxy::decidePolicyForNavigationActionSync(FrameInfoData&& f
     }
     ASSERT(m_mainFrame);
 
-    m_page->decidePolicyForNavigationActionSyncShared(m_process.copyRef(), m_webPageID, WTFMove(frameInfo), navigationID, WTFMove(navigationActionData), WTFMove(originatingFrameInfo), originatingPageID, originalRequest, WTFMove(request), WTFMove(requestBody), WTFMove(reply));
+    m_page->decidePolicyForNavigationActionSyncShared(m_process.copyRef(), m_webPageID, WTFMove(parameters), WTFMove(reply));
 }
 
 void ProvisionalPageProxy::logDiagnosticMessageFromWebProcess(const String& message, const String& description, WebCore::ShouldSample shouldSample)

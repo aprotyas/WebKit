@@ -98,7 +98,7 @@ static JSValue encode(JSGlobalObject* globalObject, const WTF::BitSet<256>& doNo
 
         // 4-d-ii. If the code unit value of C is less than 0xD800 or greater than 0xDBFF, then
         // 4-d-ii-1. Let V be the code unit value of C.
-        UChar32 codePoint;
+        char32_t codePoint;
         if (!U16_IS_LEAD(character))
             codePoint = character;
         else {
@@ -186,10 +186,10 @@ static JSValue decode(JSGlobalObject* globalObject, const CharType* characters, 
                         }
                     }
                     if (charLen != 0) {
-                        UChar32 character;
+                        char32_t character;
                         int32_t offset = 0;
                         U8_NEXT(sequence, offset, sequenceLen, character);
-                        if (character < 0)
+                        if (character == static_cast<char32_t>(U_SENTINEL))
                             charLen = 0;
                         else if (!U_IS_BMP(character)) {
                             // Convert to surrogate pair.
@@ -1067,6 +1067,27 @@ JSC_DEFINE_HOST_FUNCTION(globalFuncIsNaN, (JSGlobalObject* globalObject, CallFra
 {
     JSValue argument = callFrame->argument(0);
     return JSValue::encode(jsBoolean(std::isnan(argument.toNumber(globalObject))));
+}
+
+JSC_DEFINE_HOST_FUNCTION(globalFuncToIntegerOrInfinity, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    JSValue argument = callFrame->argument(0);
+    if (argument.isInt32())
+        return JSValue::encode(argument);
+    return JSValue::encode(jsNumber(argument.toIntegerOrInfinity(globalObject)));
+}
+
+JSC_DEFINE_HOST_FUNCTION(globalFuncToLength, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    JSValue argument = callFrame->argument(0);
+    if (argument.isInt32())
+        return JSValue::encode(jsNumber(std::max<int32_t>(argument.asInt32(), 0)));
+    return JSValue::encode(jsNumber(argument.toLength(globalObject)));
+}
+
+JSC_DEFINE_HOST_FUNCTION(globalFuncSpeciesGetter, (JSGlobalObject* globalObject, CallFrame* callFrame))
+{
+    return JSValue::encode(callFrame->thisValue().toThis(globalObject, ECMAMode::strict()));
 }
 
 } // namespace JSC

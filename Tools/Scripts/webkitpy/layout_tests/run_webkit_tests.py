@@ -125,6 +125,8 @@ def parse_args(args):
             help="Use the remote layer tree drawing model (OS X WebKit2 only)"),
         optparse.make_option("--no-remote-layer-tree", action="store_true", default=False,
             help="Disable the remote layer tree drawing model (OS X WebKit2 only)"),
+        optparse.make_option("--wpe-platform-api", action="store_true", default=False,
+            help="Use the WPE platform API (WPE only)"),
         optparse.make_option("--internal-feature", type="string", action="append", default=[],
             help="Enable (disable) an internal feature (--internal-feature FeatureName[=true|false])"),
         optparse.make_option("--experimental-feature", type="string", action="append", default=[],
@@ -351,11 +353,14 @@ def parse_args(args):
             "--use-gpu-process", action="store_true", default=False,
             help=("Enable all GPU process related features, also set additional expectations and the result report flavor.")),
         optparse.make_option(
+            "--site-isolation", action="store_true", default=False,
+            help=("Run each test in a cross origin iframe with and without site isolation enabled and compare the results. Uses site-isolation test expectations")),
+        optparse.make_option(
             "--no-use-gpu-process", action="store_true", default=False,
             help=("Disable GPU process for DOM rendering.")),
         optparse.make_option(
-            "--use-async-uikit-interactions", action="store_true", default=False,
-            help=("Opt into async UIKit interactions (iOS-family WebKit2 ports only)")),
+            "--no-use-async-uikit-interactions", action="store_true", default=False,
+            help=("Opt out of async UIKit interactions (iOS-family WebKit2 ports only)")),
         optparse.make_option(
             "--prefer-integrated-gpu", action="store_true", default=False,
             help=("Prefer using the lower-power integrated GPU on a dual-GPU system. Note that other running applications and the tests themselves can override this request.")),
@@ -415,12 +420,12 @@ def parse_args(args):
             raise RuntimeError('--accessibility-isolated-tree implicitly sets the result flavor, this should not be overridden')
         options.result_report_flavor = 'accessibility-isolated-tree'
 
-    if options.use_async_uikit_interactions:
+    if options.no_use_async_uikit_interactions:
         host = Host()
         host.initialize_scm()
         if not options.internal_feature:
             options.internal_feature = []
-        options.internal_feature.append('UseAsyncUIKitInteractions')
+        options.internal_feature.append('UseAsyncUIKitInteractions=0')
 
     return options, args
 
@@ -470,6 +475,15 @@ def _set_up_derived_options(port, options):
         if not options.additional_platform_directory:
             options.additional_platform_directory = []
         options.additional_platform_directory.insert(0, port.host.filesystem.join(host.scm().checkout_root, 'LayoutTests/platform/mac-gpup'))
+
+    if port.port_name == "mac" and options.site_isolation:
+        options.self_compare_with_header = 'SiteIsolationEnabled=true runInCrossOriginIframe=true'
+        host = Host()
+        host.initialize_scm()
+        options.additional_expectations.insert(0, port.host.filesystem.join(host.scm().checkout_root, 'LayoutTests/platform/mac-site-isolation/TestExpectations'))
+        if not options.additional_platform_directory:
+            options.additional_platform_directory = []
+        options.additional_platform_directory.insert(0, port.host.filesystem.join(host.scm().checkout_root, 'LayoutTests/platform/mac-site-isolation'))
 
     if options.additional_platform_directory:
         additional_platform_directories = []

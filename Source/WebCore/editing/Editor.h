@@ -43,7 +43,7 @@
 #include "VisibleSelection.h"
 #include "WritingDirection.h"
 #include <memory>
-#include <wtf/CheckedRef.h>
+#include <wtf/WeakRef.h>
 
 #if PLATFORM(COCOA)
 OBJC_CLASS NSAttributedString;
@@ -234,8 +234,6 @@ public:
 
     String readPlainTextFromPasteboard(Pasteboard&);
 
-    WEBCORE_EXPORT void indent();
-    WEBCORE_EXPORT void outdent();
     void transpose();
 
     bool shouldInsertFragment(DocumentFragment&, const std::optional<SimpleRange>&, EditorInsertAction);
@@ -504,7 +502,7 @@ public:
     enum class MatchStyle : bool { No, Yes };
     WEBCORE_EXPORT void replaceSelectionWithFragment(DocumentFragment&, SelectReplacement, SmartReplace, MatchStyle, EditAction = EditAction::Insert, MailBlockquoteHandling = MailBlockquoteHandling::RespectBlockquote);
     WEBCORE_EXPORT void replaceSelectionWithText(const String&, SelectReplacement, SmartReplace, EditAction = EditAction::Insert);
-    WEBCORE_EXPORT bool selectionStartHasMarkerFor(DocumentMarker::MarkerType, int from, int length) const;
+    WEBCORE_EXPORT bool selectionStartHasMarkerFor(DocumentMarker::Type, int from, int length) const;
     void updateMarkersForWordsAffectedByEditing(bool doNotRemoveIfSelectionAtWordBoundary);
     void deletedAutocorrectionAtPosition(const Position&, const String& originalString);
     
@@ -551,6 +549,9 @@ public:
     WEBCORE_EXPORT void replaceSelectionWithAttributedString(NSAttributedString *, MailBlockquoteHandling = MailBlockquoteHandling::RespectBlockquote);
     WEBCORE_EXPORT void readSelectionFromPasteboard(const String& pasteboardName);
     WEBCORE_EXPORT void replaceNodeFromPasteboard(Node&, const String& pasteboardName, EditAction = EditAction::Paste);
+
+    static RefPtr<SharedBuffer> dataInRTFDFormat(NSAttributedString *);
+    static RefPtr<SharedBuffer> dataInRTFFormat(NSAttributedString *);
 #endif
 
 #if PLATFORM(MAC)
@@ -644,8 +645,6 @@ private:
     String selectionInHTMLFormat();
     RefPtr<SharedBuffer> imageInWebArchiveFormat(Element&);
     static String userVisibleString(const URL&);
-    static RefPtr<SharedBuffer> dataInRTFDFormat(NSAttributedString *);
-    static RefPtr<SharedBuffer> dataInRTFFormat(NSAttributedString *);
 #endif
 
     void scheduleEditorUIUpdate();
@@ -659,7 +658,7 @@ private:
     void postTextStateChangeNotificationForCut(const String&, const VisibleSelection&);
 
     WeakPtr<EditorClient> m_client;
-    CheckedRef<Document> m_document;
+    WeakRef<Document, WeakPtrImplWithEventTargetData> m_document;
     RefPtr<CompositeEditCommand> m_lastEditCommand;
     RefPtr<Text> m_compositionNode;
     unsigned m_compositionStart;

@@ -30,6 +30,7 @@
 #include "DataReference.h"
 #include "FrameInfoData.h"
 #include "PDFPluginIdentifier.h"
+#include "PDFScriptEvaluator.h"
 #include <WebCore/AffineTransform.h>
 #include <WebCore/FindOptions.h>
 #include <WebCore/FloatRect.h>
@@ -67,13 +68,17 @@ class WebMouseEvent;
 class WebWheelEvent;
 struct WebHitTestResultData;
 
-class PDFPluginBase : public ThreadSafeRefCounted<PDFPluginBase>, public WebCore::ScrollableArea {
+class PDFPluginBase : public ThreadSafeRefCounted<PDFPluginBase>, public WebCore::ScrollableArea, public PDFScriptEvaluator::Client {
     WTF_MAKE_FAST_ALLOCATED;
     WTF_MAKE_NONCOPYABLE(PDFPluginBase);
 public:
     static WebCore::PluginInfo pluginInfo();
 
     virtual ~PDFPluginBase();
+
+    using WebKit::PDFScriptEvaluator::Client::weakPtrFactory;
+    using WebKit::PDFScriptEvaluator::Client::WeakValueType;
+    using WebKit::PDFScriptEvaluator::Client::WeakPtrImplType;
 
     void destroy();
 
@@ -92,6 +97,8 @@ public:
 
     virtual bool isComposited() const { return false; }
 
+    virtual bool shouldCreateTransientPaintingSnapshot() const { return false; }
+    virtual RefPtr<ShareableBitmap> snapshot() { return nullptr; }
     virtual void paint(WebCore::GraphicsContext&, const WebCore::IntRect&) { }
 
     virtual CGFloat scaleFactor() const = 0;
@@ -103,21 +110,26 @@ public:
 
     virtual void geometryDidChange(const WebCore::IntSize& pluginSize, const WebCore::AffineTransform& pluginToRootViewTransform);
     virtual void visibilityDidChange(bool);
-    virtual void contentsScaleFactorChanged(float) { }
+    virtual void deviceScaleFactorChanged(float) { }
+
+    bool handlesPageScaleFactor() const;
+    virtual void didBeginMagnificationGesture() { }
+    virtual void didEndMagnificationGesture() { }
+    virtual void setPageScaleFactor(double, std::optional<WebCore::IntPoint> origin) = 0;
 
     void updateControlTints(WebCore::GraphicsContext&);
 
     virtual RefPtr<WebCore::FragmentedSharedBuffer> liveResourceData() const = 0;
 
-    virtual bool wantsWheelEvents() const { return true; }
+    virtual bool wantsWheelEvents() const = 0;
     virtual bool handleMouseEvent(const WebMouseEvent&) = 0;
     virtual bool handleWheelEvent(const WebWheelEvent&) = 0;
     virtual bool handleMouseEnterEvent(const WebMouseEvent&) = 0;
     virtual bool handleMouseLeaveEvent(const WebMouseEvent&) = 0;
     virtual bool handleContextMenuEvent(const WebMouseEvent&) = 0;
     virtual bool handleKeyboardEvent(const WebKeyboardEvent&) = 0;
-    virtual bool handleEditingCommand(StringView commandName) = 0;
-    virtual bool isEditingCommandEnabled(StringView commandName) = 0;
+    virtual bool handleEditingCommand(const String& commandName, const String& argument) = 0;
+    virtual bool isEditingCommandEnabled(const String& commandName) = 0;
 
     virtual String getSelectionString() const = 0;
     virtual bool existingSelectionContainsPoint(const WebCore::FloatPoint&) const = 0;
@@ -128,8 +140,6 @@ public:
 
     virtual bool performDictionaryLookupAtLocation(const WebCore::FloatPoint&) = 0;
     virtual std::tuple<String, PDFSelection *, NSDictionary *> lookupTextAtLocation(const WebCore::FloatPoint&, WebHitTestResultData&) const = 0;
-
-    virtual RefPtr<ShareableBitmap> snapshot() = 0;
 
     virtual id accessibilityHitTest(const WebCore::IntPoint&) const = 0;
     virtual id accessibilityObject() const = 0;
@@ -145,13 +155,10 @@ public:
     void streamDidFinishLoading();
     void streamDidFail();
 
-    // FIXME: Rationalize these (both names and behavior).
     WebCore::IntPoint convertFromRootViewToPlugin(const WebCore::IntPoint&) const;
-    WebCore::IntPoint convertFromPluginToPDFView(const WebCore::IntPoint&) const;
-    WebCore::IntPoint convertFromPDFViewToRootView(const WebCore::IntPoint&) const;
-    WebCore::IntRect convertFromPDFViewToRootView(const WebCore::IntRect&) const;
-    WebCore::IntPoint convertFromRootViewToPDFView(const WebCore::IntPoint&) const;
-    WebCore::FloatRect convertFromPDFViewToScreen(const WebCore::FloatRect&) const;
+    WebCore::IntRect convertFromRootViewToPlugin(const WebCore::IntRect&) const;
+    WebCore::IntPoint convertFromPluginToRootView(const WebCore::IntPoint&) const;
+    WebCore::IntRect convertFromPluginToRootView(const WebCore::IntRect&) const;
     WebCore::IntRect boundsOnScreen() const;
 
     WebCore::ScrollPosition scrollPositionForTesting() const { return scrollPosition(); }
@@ -179,7 +186,7 @@ protected:
 
     void createPDFDocument();
     virtual void installPDFDocument() = 0;
-    virtual void tryRunScriptsInPDFDocument() { }
+    void tryRunScriptsInPDFDocument();
 
     virtual void incrementalPDFStreamDidReceiveData(const WebCore::SharedBuffer&) { }
     virtual bool incrementalPDFStreamDidFinishLoading() { return false; }
@@ -194,6 +201,8 @@ protected:
 
     void invalidateRect(const WebCore::IntRect&);
 
+    void print() override;
+
     // ScrollableArea functions.
     WebCore::IntRect scrollCornerRect() const final;
     WebCore::ScrollableArea* enclosingScrollableArea() const final;
@@ -207,15 +216,24 @@ protected:
     WebCore::ScrollPosition minimumScrollPosition() const final;
     WebCore::ScrollPosition maximumScrollPosition() const final;
     WebCore::IntSize visibleSize() const final { return m_size; }
+    WebCore::IntPoint lastKnownMousePositionInView() const override { return m_lastMousePositionInPluginCoordinates; }
+
     float deviceScaleFactor() const override;
     bool shouldSuspendScrollAnimations() const final { return false; } // If we return true, ScrollAnimatorMac will keep cycling a timer forever, waiting for a good time to animate.
-    void scrollbarStyleChanged(WebCore::ScrollbarStyle, bool forceUpdate) final;
+    void scrollbarStyleChanged(WebCore::ScrollbarStyle, bool forceUpdate) override;
+
     WebCore::IntRect convertFromScrollbarToContainingView(const WebCore::Scrollbar&, const WebCore::IntRect& scrollbarRect) const final;
     WebCore::IntRect convertFromContainingViewToScrollbar(const WebCore::Scrollbar&, const WebCore::IntRect& parentRect) const final;
     WebCore::IntPoint convertFromScrollbarToContainingView(const WebCore::Scrollbar&, const WebCore::IntPoint& scrollbarPoint) const final;
     WebCore::IntPoint convertFromContainingViewToScrollbar(const WebCore::Scrollbar&, const WebCore::IntPoint& parentPoint) const final;
+
     bool forceUpdateScrollbarsOnMainThreadForPerformanceTesting() const final;
     bool shouldPlaceVerticalScrollbarOnLeft() const final { return false; }
+
+    WebCore::IntRect viewRelativeVerticalScrollbarRect() const;
+    WebCore::IntRect viewRelativeHorizontalScrollbarRect() const;
+    WebCore::IntRect viewRelativeScrollCornerRect() const;
+
     String debugDescription() const final;
 
     // Scrolling, but not ScrollableArea:
@@ -227,12 +245,13 @@ protected:
     // HUD.
 #if ENABLE(PDF_HUD)
     void updatePDFHUDLocation();
-    WebCore::IntRect frameForHUD() const;
+    WebCore::IntRect frameForHUDInRootViewCoordinates() const;
     bool hudEnabled() const;
 #endif
 
-    WeakPtr<PluginView> m_view;
+    SingleThreadWeakPtr<PluginView> m_view;
     WeakPtr<WebFrame> m_frame;
+    WeakPtr<WebCore::HTMLPlugInElement, WebCore::WeakPtrImplWithEventTargetData> m_element;
 
     PDFPluginIdentifier m_identifier;
 
@@ -246,6 +265,7 @@ protected:
     WebCore::AffineTransform m_rootViewToPluginTransform;
 
     WebCore::IntSize m_scrollOffset;
+    WebCore::IntPoint m_lastMousePositionInPluginCoordinates;
 
     RefPtr<WebCore::Scrollbar> m_horizontalScrollbar;
     RefPtr<WebCore::Scrollbar> m_verticalScrollbar;
@@ -253,6 +273,7 @@ protected:
     bool m_documentFinishedLoading { false };
     bool m_isBeingDestroyed { false };
     bool m_hasBeenDestroyed { false };
+    bool m_didRunScripts { false };
 };
 
 } // namespace WebKit

@@ -38,7 +38,7 @@ Ref<AccessibilityUIElement> AccessibilityUIElement::create(PlatformUIElement uiE
     RELEASE_ASSERT(uiElement);
     return adoptRef(*new AccessibilityUIElement(uiElement));
 }
-    
+
 Ref<AccessibilityUIElement> AccessibilityUIElement::create(const AccessibilityUIElement& uiElement)
 {
     return adoptRef(*new AccessibilityUIElement(uiElement));
@@ -48,7 +48,7 @@ JSClassRef AccessibilityUIElement::wrapperClass()
 {
     return JSAccessibilityUIElement::accessibilityUIElementClass();
 }
-    
+
 // Implementation
 
 bool AccessibilityUIElement::isValid() const
@@ -59,13 +59,6 @@ bool AccessibilityUIElement::isValid() const
     return m_element;
 #endif
 }
-
-#if !ENABLE(ACCESSIBILITY_ISOLATED_TREE)
-bool AccessibilityUIElement::isIsolatedObject() const
-{
-    return false;
-}
-#endif
 
 // iOS specific methods
 #if !PLATFORM(IOS_FAMILY)
@@ -96,7 +89,7 @@ bool AccessibilityUIElement::isInList() const { return false; }
 bool AccessibilityUIElement::isMarkAnnotation() const { return false; }
 bool AccessibilityUIElement::supportsExpanded() const { return false; }
 #endif
-    
+
 // Unsupported methods on various platforms. As they're implemented on other platforms this list should be modified.
 #if PLATFORM(COCOA) || !ENABLE(ACCESSIBILITY)
 JSRetainPtr<JSStringRef> AccessibilityUIElement::characterAtOffset(int) { return nullptr; }
@@ -153,6 +146,34 @@ JSValueRef AccessibilityUIElement::children() const { return { }; }
 JSValueRef AccessibilityUIElement::imageOverlayElements() const { return { }; }
 JSRetainPtr<JSStringRef> AccessibilityUIElement::embeddedImageDescription() const { return nullptr; }
 #endif // !PLATFORM(COCOA) || !ENABLE(ACCESSIBILITY)
+
+#if PLATFORM(IOS_FAMILY)
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::controllerElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaDescribedByElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::descriptionForElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::detailsForElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::errorMessageForElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::flowFromElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaLabelledByElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::labelForElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ownerElementAtIndex(unsigned) { return nullptr; }
+#endif // PLATFORM(IOS_FAMILY)
+
+#if PLATFORM(WIN) || PLATFORM(PLAYSTATION)
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::controllerElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaDescribedByElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::descriptionForElementAtIndex(unsigned) { return nullptr; }
+JSValueRef AccessibilityUIElement::detailsElements() const { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaDetailsElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::detailsForElementAtIndex(unsigned) { return nullptr; }
+JSValueRef AccessibilityUIElement::errorMessageElements() const { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaErrorMessageElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::errorMessageForElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::flowFromElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaLabelledByElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::labelForElementAtIndex(unsigned) { return nullptr; }
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ownerElementAtIndex(unsigned) { return nullptr; }
+#endif // PLATFORM(WIN) || PLATFORM(PLAYSTATION)
 
 } // namespace WTR
 #endif // ENABLE(ACCESSIBILITY)

@@ -112,10 +112,14 @@ JSC_DECLARE_JIT_OPERATION(operationWasmArrayNewElem, EncodedJSValue, (Instance* 
 JSC_DECLARE_JIT_OPERATION(operationWasmArrayNewEmpty, EncodedJSValue, (Instance* instance, uint32_t typeIndex, uint32_t size));
 JSC_DECLARE_JIT_OPERATION(operationWasmArrayGet, EncodedJSValue, (Instance* instance, uint32_t typeIndex, EncodedJSValue encValue, uint32_t index));
 JSC_DECLARE_JIT_OPERATION(operationWasmArraySet, void, (Instance* instance, uint32_t typeIndex, EncodedJSValue encValue, uint32_t index, EncodedJSValue value));
+JSC_DECLARE_JIT_OPERATION(operationWasmArrayFill, UCPUStrictInt32, (Instance*, uint32_t, EncodedJSValue, uint32_t, EncodedJSValue, uint32_t));
+JSC_DECLARE_JIT_OPERATION(operationWasmArrayCopy, UCPUStrictInt32, (Instance*, EncodedJSValue, uint32_t, EncodedJSValue, uint32_t, uint32_t));
+JSC_DECLARE_JIT_OPERATION(operationWasmArrayInitElem, UCPUStrictInt32, (Instance*, EncodedJSValue, uint32_t, uint32_t, uint32_t, uint32_t));
+JSC_DECLARE_JIT_OPERATION(operationWasmArrayInitData, UCPUStrictInt32, (Instance*, EncodedJSValue, uint32_t, uint32_t, uint32_t, uint32_t));
 JSC_DECLARE_JIT_OPERATION(operationWasmIsSubRTT, bool, (Wasm::RTT*, Wasm::RTT*));
 JSC_DECLARE_JIT_OPERATION(operationWasmAnyConvertExtern, EncodedJSValue, (EncodedJSValue));
 
-JSC_DECLARE_JIT_OPERATION(operationWasmRefTest, int32_t, (Instance*, EncodedJSValue, uint32_t, int32_t));
+JSC_DECLARE_JIT_OPERATION(operationWasmRefTest, int32_t, (Instance*, EncodedJSValue, uint32_t, int32_t, bool));
 JSC_DECLARE_JIT_OPERATION(operationWasmRefCast, EncodedJSValue, (Instance*, EncodedJSValue, uint32_t, int32_t));
 
 #if USE(JSVALUE64)

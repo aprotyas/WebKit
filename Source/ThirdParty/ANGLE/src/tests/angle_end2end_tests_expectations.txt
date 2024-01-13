@@ -29,6 +29,8 @@
 6989 GLES : BlitFramebufferTestES31.OOBResolve/* = SKIP
 7881 VULKAN : MultithreadingTestES3.UnsynchronizedTextureReads/* = SKIP
 7881 VULKAN : MultithreadingTestES3.UnsynchronizedTextureReads2/* = SKIP
+// Incorrectly handled pretty much in all backends
+8446 : CopyTexImageTestES3.RedefineSameLevel/* = SKIP
 
 6743 OPENGL : SimpleStateChangeTestES3.RespecifyBufferAfterBeginTransformFeedback/* = SKIP
 6743 GLES : SimpleStateChangeTestES3.RespecifyBufferAfterBeginTransformFeedback/* = SKIP
@@ -109,6 +111,8 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 7872 WIN INTEL OPENGL : VertexAttributeTest.AliasingMatrixAttribLocations/ES2_OpenGL = SKIP
 7872 WIN INTEL OPENGL : VertexAttributeTest.ShortUnnormalized/ES2_OpenGL = SKIP
 7872 WIN INTEL OPENGL : ViewportTest.DoubleWindowCentered/ES2_OpenGL = SKIP
+8441 WIN INTEL OPENGL : GLSLTest_ES3.LargeInterfaceBlockArray/* = SKIP
+8441 WIN INTEL OPENGL : GLSLTest_ES3.LargeInterfaceBlockNestedArray/* = SKIP
 
 // Linux
 6065 LINUX INTEL VULKAN : SimpleStateChangeTestES31.DrawThenUpdateUBOThenDrawThenDrawIndexed/* = SKIP
@@ -144,6 +148,10 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 6977 LINUX NVIDIA OpenGL : MipmapTestES31.GenerateLowerMipsWithDraw/* = SKIP
 7301 LINUX NVIDIA OpenGL : CopyTexImageTest.RGBAToRGB/ES2_OpenGL_EmulateCopyTexImage2DFromRenderbuffers/* = SKIP
 7371 LINUX NVIDIA OpenGL : FramebufferTest_ES3.SurfaceDimensionsChangeAndFragCoord/* = SKIP
+8441 NVIDIA OPENGL : GLSLTest_ES3.LargeInterfaceBlockArray/* = SKIP
+8441 NVIDIA OPENGL : GLSLTest_ES3.LargeInterfaceBlockNestedArray/* = SKIP
+8441 NVIDIA GLES : GLSLTest_ES3.LargeInterfaceBlockArray/* = SKIP
+8441 NVIDIA GLES : GLSLTest_ES3.LargeInterfaceBlockNestedArray/* = SKIP
 
 // Nvidia Vulkan
 7236 NVIDIA VULKAN : GLSLTest_ES31.TessellationControlShaderMatrixCopyBug/* = SKIP
@@ -216,9 +224,6 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 6347 MAC OPENGL : FramebufferTestWithFormatFallback.R5G5B5A1_CubeTexImage/* = SKIP
 6347 MAC OPENGL : FramebufferTestWithFormatFallback.R4G4B4A4_OutOfRangeStagedUpdateReformated/* = SKIP
 6387 MAC AMD METAL : GLSLTest_ES3.ValidIndexClampES300/ES3_Metal = SKIP
-6525 MAC METAL : GLSLTest.EmbeddedStructUniformArray/* = SKIP
-6525 MAC NVIDIA METAL : GLSLTest.VectorScalarDivideAndAddInLoop/* = SKIP
-6525 MAC NVIDIA METAL : GLSLTest.VectorScalarMultiplyAndAddInLoop/* = SKIP
 6570 MAC INTEL OPENGL : WebGLCompatibilityTest.L32FTextures/* = SKIP
 6570 MAC INTEL OPENGL : WebGLCompatibilityTest.R32FTextures/* = SKIP
 6570 MAC INTEL OPENGL : WebGLCompatibilityTest.RG32FTextures/* = SKIP
@@ -242,6 +247,8 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 5155 MAC NVIDIA OPENGL : CopyTextureTestES3.InvalidateCopyThenBlend/ES3_OpenGL = SKIP
 5155 MAC NVIDIA OPENGL : CopyTextureTestES3.InvalidateBlitThenBlend3Layers/ES3_OpenGL = SKIP
 7530 MAC NVIDIA OPENGL : TransformFeedbackTest.RenderOnceChangeXfbBufferRenderAgain/* = SKIP
+8448 MAC INTEL OPENGL : WebGL2CompatibilityTest.DrawWithInstancedAndNonInstancedAttributes/* = SKIP
+8465 MAC NVIDIA OPENGL : UniformBufferTest.BufferBlockBindingChange/ES3_OpenGL = SKIP
 
 // BlitFramebufferTest.ScissoredMultisampleStencil failures
 3496 MAC INTEL OPENGL : BlitFramebufferTest.ScissoredMultisampleStencil/* = SKIP
@@ -257,13 +264,6 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 6415 MAC INTEL METAL : CompressedTexturePVRTC1SRGBTest.Test/ES3_Metal__SRGB_PVRTC_2BPPV1 = SKIP
 5345 MAC METAL AMD : TransformFeedbackTest.BufferOutOfMemory/ES3_Metal = SKIP
 5345 MAC METAL INTEL : TransformFeedbackTest.BufferOutOfMemory/ES3_Metal = SKIP
-
-// Direct Metal does not yet implement vertex attribute aliasing
-// Attribute aliasing is only allowed in GLSL ES 1.0 but disallowed by WebGL
-// and GLSL ES 3.00 so it's a low priority to fix.
-6297 MAC METAL : VertexAttributeTest.AliasingMatrixAttribLocations/* = SKIP
-6297 MAC METAL : VertexAttributeTest.AliasingVectorAttribLocations/* = SKIP
-6297 MAC METAL : VertexAttributeTest.AliasingVectorAttribLocationsDifferingPrecisions/* = SKIP
 
 // Old Macs can't run these and there's apparently no way to filter the old Macs
 // from running these tests at the moment.
@@ -289,8 +289,6 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 6418 MAC NVIDIA METAL : UniformBlockWithOneLargeArrayMemberTest.TwoUniformBlocksInSameProgram/ES3_Metal = SKIP
 6418 MAC NVIDIA METAL : UniformBlockWithOneLargeArrayMemberTest.SharedSameBufferWithOtherOne/ES3_Metal = SKIP
 6418 MAC NVIDIA METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsStruct/ES3_Metal = SKIP
-6418 MAC APPLE METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMatrixAndInstanced/ES3_Metal = SKIP
-6418 MAC APPLE METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsStructAndInstancedArray/ES3_Metal = SKIP
 
 7079 MAC METAL INTEL : MultisampleResolveTest.ResolveD32FS8F4Samples/ES3_Metal_AlwaysResolveMultisampleRenderBuffers = SKIP
 7079 MAC METAL INTEL : MultisampleResolveTest.ResolveD24S8Samples/ES3_Metal_AlwaysResolveMultisampleRenderBuffers = SKIP
@@ -302,7 +300,6 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 4908 MAC METAL AMD : BlitFramebufferTest.MultisampleDepth/* = SKIP
 
 5284 MAC METAL AMD : ColorMaskForDrawBuffersTest.Blit/* = SKIP
-5360 MAC METAL APPLE : ColorMaskForDrawBuffersTest.Blit/* = SKIP
 
 // The workaround is not intended to be enabled in this configuration so
 // skip it as the failure is likely a driver bug.
@@ -325,29 +322,13 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 
 6453 MAC METAL AMD : RobustResourceInitTest.SurfaceInitializedAfterSwap/* = SKIP
 
-6454 MAC METAL : RobustResourceInitTestES3.CompressedSubImage/* = SKIP
-
-6454 MAC METAL : RobustResourceInitTestES3.D3D11RecoverFromStorageBug/ES3_Metal = SKIP
-
-5325 MAC METAL : ShaderInterpTest.Flat/* = SKIP
-
 5108 MAC METAL AMD : SRGBTextureTestES3.GenerateMipmaps/* = SKIP
 
 6455 MAC METAL NVIDIA : Texture2DBaseMaxTestES3.Fuzz545ImmutableTexRenderFeedback/* = SKIP
-5360 MAC METAL APPLE : Texture2DBaseMaxTestES3.Fuzz545ImmutableTexRenderFeedback/* = SKIP
 
 6456 MAC METAL INTEL : Texture2DTest.TextureSizeCase1/* = SKIP
 
-6457 MAC METAL : TextureUploadFormatTest.All/ES3_Metal = SKIP
-
-6458 MAC METAL : TriangleFanDrawTest.DrawTriangleFanPrimitiveRestartAtBegin/* = SKIP
-
-// Metal doesn't implement 3D texture yet.
-4136 MAC METAL : WebGL2ReadOutsideFramebufferTest.CopyTexSubImage3D/* = SKIP
-
 5233 MAC METAL : WebGL2ValidationStateChangeTest.MultiAttachmentDrawFramebufferNegativeAPI/* = SKIP
-
-6702 MAC METAL APPLE : MultisampleTest.ContentPresevedAfterInterruption/ES2_Metal_NoFixture__NoStoreAndResolve = SKIP
 
 7451 MAC METAL INTEL : PointSpritesTest.PointSizeAboveMaxIsClamped/ES2_Metal = SKIP
 
@@ -401,6 +382,7 @@ b/273271471 WIN INTEL VULKAN : ShaderAlgorithmTest.rgb_to_hsl_vertex_shader/* = 
 7329 WIN D3D11 : StateChangeTestES3.PrimitiveRestart/* = SKIP
 8100 WIN D3D11 : WebGL2GLSLTest.InitOutputParams/* = SKIP
 1456243 WIN D3D11 : WebGL2CompatibilityTest.DrawWithZeroSizedBuffer/* = SKIP
+8411 WIN D3D9 : GLSLTest.VectorScalarArithmeticWithSideEffectInLoop/* = SKIP
 
 // Android
 6095 ANDROID GLES : GLSLTest_ES3.InitGlobalComplexConstant/* = SKIP
@@ -569,8 +551,9 @@ b/305292977 PIXEL4ORXL VULKAN : FramebufferTest_ES31.ClearWithColorMasksRGB5A1/*
 b/305311693 PIXEL4ORXL GLES : FramebufferTest_ES31.ClearColorMorePrecisionThanFBOFormatShouldNotApplyDithering/* = SKIP
 b/308668391 PIXEL4ORXL VULKAN : ImageTest.SourceYUVAHBTargetExternalRGBSampleNoData/* = SKIP
 
-8310 PIXEL4ORXL VULKAN : VulkanImageTest.PreInitializedOnGLImportLinearTiling/* = SKIP
-8310 LINUX SWIFTSHADER : VulkanImageTest.PreInitializedOnGLImportLinearTiling/* = SKIP
+8310 PIXEL4ORXL VULKAN : VulkanExternalImageTest.PreInitializedOnGLImportLinear*/* = SKIP
+8310 LINUX SWIFTSHADER : VulkanExternalImageTest.PreInitializedOnGLImportLinear*/* = SKIP
+8310 LINUX INTEL VULKAN : VulkanExternalImageTest.PreInitializedOnGLImportLinear*/* = SKIP
 
 6167 NEXUS5X GLES : DepthStencilTestES3.FramebufferClearThenStencilAttachedThenStencilTestState/* = SKIP
 6167 NEXUS5X GLES : DepthStencilTestES3.FramebufferClearThenStencilTestStateThenStencilAttached/* = SKIP
@@ -814,8 +797,6 @@ b/308668391 PIXEL4ORXL VULKAN : ImageTest.SourceYUVAHBTargetExternalRGBSampleNoD
 7994 IOS METAL : FramebufferTest_ES3.RenderAndInvalidateImmutableTextureWithBeyondMaxLevel/ES3_Metal = SKIP
 7994 IOS METAL : FramebufferTest_ES3.RenderAndInvalidateImmutableTextureWithSubImageWithBeyondMaxLevel/ES3_Metal = SKIP
 7994 IOS METAL : FramebufferTest_ES3.RenderSampleDepthTextureWithExcludedLevel/ES3_Metal = SKIP
-7994 IOS METAL : GLSLTest.EmbeddedStructUniformArray/ES2_Metal = SKIP
-7994 IOS METAL : GLSLTest.EmbeddedStructUniformArray/ES3_Metal = SKIP
 7994 IOS METAL : KTXCompressedTextureTest.CompressedTexImageETC1/ES2_Metal = SKIP
 7994 IOS METAL : KTXCompressedTextureTest.CompressedTexImageETC1/ES3_Metal = SKIP
 7994 IOS METAL : MaxTextureSizeTest.Render1xTexture/ES2_Metal = SKIP
@@ -891,37 +872,18 @@ b/308668391 PIXEL4ORXL VULKAN : ImageTest.SourceYUVAHBTargetExternalRGBSampleNoD
 7994 IOS METAL : Texture2DTest.ManySupersedingTextureUpdates/ES2_Metal = SKIP
 7994 IOS METAL : Texture2DTest.TextureSizeCase1/ES2_Metal = SKIP
 7994 IOS METAL : TextureUploadFormatTest.All/ES3_Metal = SKIP
-7994 IOS METAL : TriangleFanDrawTest.DrawTriangleFanPrimitiveRestartAtBegin/ES3_Metal = SKIP
-7994 IOS METAL : TriangleFanDrawTest.DrawTriangleFanPrimitiveRestartAtBegin/ES3_Metal_ForceBufferGPUStorage = SKIP
-7994 IOS METAL : TriangleFanDrawTest.DrawTriangleFanPrimitiveRestartAtBegin/ES3_Metal_NoHasExplicitMemBarrier_NoHasCheapRenderPass = SKIP
 7994 IOS METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMatrixAndInstanced/ES3_Metal = SKIP
 7994 IOS METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMixStructFloatAndMat4/ES3_Metal = SKIP
 7994 IOS METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsMixStructMat4AndFloat/ES3_Metal = SKIP
 7994 IOS METAL : UniformBlockWithOneLargeArrayMemberTest.MemberTypeIsStructAndInstancedArray/ES3_Metal = SKIP
 7994 IOS METAL : UniformBlockWithOneLargeArrayMemberTest.SharedSameBufferWithOtherOne/ES3_Metal = SKIP
 7994 IOS METAL : UniformBlockWithOneLargeArrayMemberTest.TwoUniformBlocksInSameProgram/ES3_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingMatrixAttribLocations/ES2_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingMatrixAttribLocations/ES3_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingMatrixAttribLocations/ES3_Metal_HasCheapRenderPass_NoHasExplicitMemBarrier = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingMatrixAttribLocations/ES3_Metal_NoHasExplicitMemBarrier_NoHasCheapRenderPass = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocations/ES2_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocations/ES3_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocations/ES3_Metal_HasCheapRenderPass_NoHasExplicitMemBarrier = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocations/ES3_Metal_NoHasExplicitMemBarrier_NoHasCheapRenderPass = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocationsDifferingPrecisions/ES2_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocationsDifferingPrecisions/ES3_Metal = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocationsDifferingPrecisions/ES3_Metal_HasCheapRenderPass_NoHasExplicitMemBarrier = SKIP
-7994 IOS METAL : VertexAttributeTest.AliasingVectorAttribLocationsDifferingPrecisions/ES3_Metal_NoHasExplicitMemBarrier_NoHasCheapRenderPass = SKIP
-7994 IOS METAL : VertexAttributeTestES3.DrawWithUnalignedData/ES3_Metal = SKIP
-7994 IOS METAL : VertexAttributeTestES3.DrawWithUnalignedData/ES3_Metal_HasCheapRenderPass_NoHasExplicitMemBarrier = SKIP
-7994 IOS METAL : VertexAttributeTestES3.DrawWithUnalignedData/ES3_Metal_NoHasExplicitMemBarrier_NoHasCheapRenderPass = SKIP
-7994 IOS METAL : WebGL2ReadOutsideFramebufferTest.CopyTexSubImage3D/ES2_Metal = SKIP
 7994 IOS METAL : WebGL2ValidationStateChangeTest.MultiAttachmentDrawFramebufferNegativeAPI/ES3_Metal = SKIP
 8043 IOS METAL : FramebufferTest_ES3.RenderSharedExponent/ES3_Metal = SKIP
 8051 IOS METAL : Texture2DDepthStencilTestES3.TexSampleModes*Swizzled/ES3_Metal = SKIP
 8278 IOS METAL : GLSLTest_ES3.LiteralInfinityOutput/ES3_Metal = SKIP
 8278 IOS METAL : GLSLTest_ES3.LiteralNegativeInfinityOutput/ES3_Metal = SKIP
-  
+
 // Test is disabled as it only pertains to desktop GLSL
 6197 : GLSLTest_ES31.InterpolateAtWithSwizzle/* = SKIP
 
@@ -929,15 +891,12 @@ b/308668391 PIXEL4ORXL VULKAN : ImageTest.SourceYUVAHBTargetExternalRGBSampleNoD
 
 6358 D3D11 : GLSLTest_ES3.UnsuccessfulRelinkWithBindAttribLocation/* = SKIP
 6358 SWIFTSHADER : GLSLTest_ES3.UnsuccessfulRelinkWithBindAttribLocation/* = SKIP
-6358 METAL : GLSLTest_ES3.UnsuccessfulRelinkWithBindAttribLocation/* = SKIP
 
 // HLSL compiler bug
 2445 D3D11 : GLSLTest_ES3.ComplexCrossExpression/* = SKIP
 
 // Direct MSL compilation bug.
-6540 METAL : GLSLTest_ES3.ComplexCrossExpression/* = SKIP
 7145 METAL : GLSLTest.AliasingFunctionOutParamAndGlobal/* = SKIP
-7309 METAL : StateChangeTestES3.PrimitiveMode/* = SKIP
 
 // Bots missing drivers with VK_EXT_provoking_vertex
 6526 WIN INTEL VULKAN : ProgramBinaryES3Test.SaveAndLoadDetachedShaders/* = SKIP
@@ -958,7 +917,6 @@ b/308668391 PIXEL4ORXL VULKAN : ImageTest.SourceYUVAHBTargetExternalRGBSampleNoD
 6652 MAC INTEL OPENGL : DrawTextureTest.CorrectNdcForOddViewportDimensions/* = SKIP
 
 // Indexed indirect draw offset bug
-6751 METAL : MultiDrawIndirectTest.MultiDrawElementsIndirect* = SKIP
 7441 D3D11 : DrawBaseInstanceTest.DrawElementsInstancedBaseInstance/ES3_D3D11__DynamicDraw* = SKIP
 
 // ASAN flakes with Vulkan / SwiftShader / AsyncCommandQueue
@@ -1053,6 +1011,10 @@ b/308668391 PIXEL4ORXL VULKAN : ImageTest.SourceYUVAHBTargetExternalRGBSampleNoD
 // Timeout with SwiftShader and MAC OpenGL due to large workloads
 7389 SWIFTSHADER : Texture2DTest.ManySupersedingTextureUpdates/* = SKIP
 7389 MAC OPENGL : Texture2DTest.ManySupersedingTextureUpdates/* = SKIP
+
+8437 MAC OPENGL : GLSLTest_ES3.LotsOfFieldsInStruct/* = SKIP
+8437 MAC OPENGL : GLSLTest_ES3.LargeInterfaceBlockArray/* = SKIP
+8437 MAC OPENGL : GLSLTest_ES3.LargeInterfaceBlockNestedArray/* = SKIP
 
 // GL, GLES run into issues with cleanup
 7495 WIN OpenGL : EGLMultiContextTest.ReuseUnterminatedDisplay/* = SKIP
@@ -1389,13 +1351,16 @@ b/266235549 D3D11 : ComputeShaderTest.SSBOAliasOverWrite/* = SKIP
 8378 WIN INTEL OPENGL : Texture2DBaseMaxTestES3.NotColorRenderableAfterColorRenderableBelowBaseLevel/* = SKIP
 8378 WIN INTEL OPENGL : Texture2DBaseMaxTestES3.DepthRenderableAfterColorRenderableBelowBaseLevel/* = SKIP
 
+8453 WIN VULKAN : VulkanPerformanceCounterTest.SubmittingOutsideCommandBufferDoesNotBreakRenderPass/* = SKIP
+8453 LINUX VULKAN : VulkanPerformanceCounterTest.SubmittingOutsideCommandBufferDoesNotBreakRenderPass/* = SKIP
+
+// Workaround feature that is only supposed to be enabled on vulkan backend
+b/292285899 PIXEL4ORXL GLES : EGLSurfaceTest.DestroyAndRecreateWhileCurrent/* = SKIP
+
 // Slow tests, should appear last in this file
 5076 : GLSLTest.VerifyMaxVertexUniformVectors* = TIMEOUT
 5076 : GLSLTest.VerifyMaxFragmentUniformVectors* = TIMEOUT
 6261 : MultithreadingTest* = TIMEOUT
-
-// Workaround feature that is only supposed to be enabled on vulkan backend
-b/292285899 PIXEL4ORXL GLES : EGLSurfaceTest.DestroyAndRecreateWhileCurrent/* = SKIP
 
 // Please do not add expectations below this line,
 // so that TIMEOUT expectations above don't override more precise SKIP expectations

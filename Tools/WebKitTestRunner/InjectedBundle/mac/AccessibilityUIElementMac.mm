@@ -89,10 +89,13 @@
 #define NSAccessibilityTextInputMarkedTextMarkerRangeAttribute @"AXTextInputMarkedTextMarkerRange"
 #endif
 
+#ifndef NSAccessibilityIntersectionWithSelectionRangeAttribute
+#define NSAccessibilityIntersectionWithSelectionRangeAttribute @"AXIntersectionWithSelectionRange"
+#endif
+
 typedef void (*AXPostedNotificationCallback)(id element, NSString* notification, void* context);
 
 @interface NSObject (WebKitAccessibilityAdditions)
-- (BOOL)isIsolatedObject;
 - (BOOL)accessibilityReplaceRange:(NSRange)range withText:(NSString *)string;
 - (BOOL)accessibilityInsertText:(NSString *)text;
 - (NSArray *)accessibilityArrayAttributeValues:(NSString *)attribute index:(NSUInteger)index maxCount:(NSUInteger)maxCount;
@@ -130,13 +133,6 @@ bool AccessibilityUIElement::isEqual(AccessibilityUIElement* otherElement)
         return false;
     return platformUIElement() == otherElement->platformUIElement();
 }
-
-#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
-bool AccessibilityUIElement::isIsolatedObject() const
-{
-    return [m_element isIsolatedObject];
-}
-#endif
 
 RetainPtr<NSArray> supportedAttributes(id element)
 {
@@ -512,6 +508,26 @@ RefPtr<AccessibilityUIElement> AccessibilityUIElement::linkedUIElementAtIndex(un
     return elementForAttributeAtIndex(NSAccessibilityLinkedUIElementsAttribute, index);
 }
 
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::controllerElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXControllers", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaControlsElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXControllerFor", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaDescribedByElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXDescribedBy", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::descriptionForElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXDescriptionFor", index);
+}
+
 JSValueRef AccessibilityUIElement::detailsElements() const
 {
     BEGIN_AX_OBJC_EXCEPTIONS
@@ -519,8 +535,17 @@ JSValueRef AccessibilityUIElement::detailsElements() const
     if ([elements isKindOfClass:NSArray.class])
         return makeJSArray(makeVector<RefPtr<AccessibilityUIElement>>(elements.get()));
     END_AX_OBJC_EXCEPTIONS
-
     return { };
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaDetailsElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXDetailsElements", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::detailsForElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXDetailsFor", index);
 }
 
 JSValueRef AccessibilityUIElement::errorMessageElements() const
@@ -530,13 +555,22 @@ JSValueRef AccessibilityUIElement::errorMessageElements() const
     if ([elements isKindOfClass:NSArray.class])
         return makeJSArray(makeVector<RefPtr<AccessibilityUIElement>>(elements.get()));
     END_AX_OBJC_EXCEPTIONS
-
     return { };
 }
 
-RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaOwnsElementAtIndex(unsigned index)
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaErrorMessageElementAtIndex(unsigned index)
 {
-    return elementForAttributeAtIndex(NSAccessibilityOwnsAttribute, index);
+    return elementForAttributeAtIndex(@"AXErrorMessageElements", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::errorMessageForElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXErrorMessageFor", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::flowFromElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(@"AXFlowFrom", index);
 }
 
 RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaFlowToElementAtIndex(unsigned index)
@@ -544,22 +578,24 @@ RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaFlowToElementAtIndex(
     return elementForAttributeAtIndex(NSAccessibilityLinkedUIElementsAttribute, index);
 }
 
-RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaControlsElementAtIndex(unsigned index)
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaLabelledByElementAtIndex(unsigned index)
 {
-    // Per spec, aria-controls is exposed via AXLinkedUIElements on the Mac.
-    // Note that a few other things are exposed via AXLinkedUIElements (aria-flowto), so this function
-    // may provide unexpected results for tests that use a combination of these attributes.
-    return linkedUIElementAtIndex(index);
+    return elementForAttributeAtIndex(@"AXLabelledBy", index);
 }
 
-RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaDetailsElementAtIndex(unsigned index)
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::labelForElementAtIndex(unsigned index)
 {
-    return elementForAttributeAtIndex(@"AXDetailsElements", index);
+    return elementForAttributeAtIndex(@"AXLabelFor", index);
 }
 
-RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaErrorMessageElementAtIndex(unsigned index)
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ownerElementAtIndex(unsigned index)
 {
-    return elementForAttributeAtIndex(@"AXErrorMessageElements", index);
+    return elementForAttributeAtIndex(@"AXOwners", index);
+}
+
+RefPtr<AccessibilityUIElement> AccessibilityUIElement::ariaOwnsElementAtIndex(unsigned index)
+{
+    return elementForAttributeAtIndex(NSAccessibilityOwnsAttribute, index);
 }
 
 RefPtr<AccessibilityUIElement> AccessibilityUIElement::disclosedRowAtIndex(unsigned index)
@@ -1298,9 +1334,9 @@ unsigned AccessibilityUIElement::uiElementCountForSearchPredicate(JSContextRef c
 {
     BEGIN_AX_OBJC_EXCEPTIONS
     NSDictionary *parameterizedAttribute = searchPredicateParameterizedAttributeForSearchCriteria(context, startElement, isDirectionNext, UINT_MAX, searchKey, searchText, visibleOnly, immediateDescendantsOnly);
-    auto value = attributeValueForParameter(@"AXUIElementCountForSearchPredicate", parameterizedAttribute);
-    if ([value isKindOfClass:[NSNumber class]])
-        return [value unsignedIntValue];
+    auto value = attributeValueForParameter(@"AXUIElementsForSearchPredicate", parameterizedAttribute);
+    if ([value isKindOfClass:[NSArray class]])
+        return [value count];
     END_AX_OBJC_EXCEPTIONS
     
     return 0;
@@ -1542,8 +1578,21 @@ JSRetainPtr<JSStringRef> AccessibilityUIElement::selectedTextRange()
     auto indexRange = attributeValue(NSAccessibilitySelectedTextRangeAttribute);
     if (indexRange)
         range = [indexRange rangeValue];
-    NSMutableString* rangeDescription = [NSMutableString stringWithFormat:@"{%lu, %lu}", static_cast<unsigned long>(range.location), static_cast<unsigned long>(range.length)];
+    NSString *rangeDescription = [NSString stringWithFormat:@"{%lu, %lu}", static_cast<unsigned long>(range.location), static_cast<unsigned long>(range.length)];
     return [rangeDescription createJSStringRef];
+    END_AX_OBJC_EXCEPTIONS
+
+    return nullptr;
+}
+
+JSRetainPtr<JSStringRef> AccessibilityUIElement::intersectionWithSelectionRange()
+{
+    BEGIN_AX_OBJC_EXCEPTIONS
+    if (auto rangeAttribute = attributeValue(NSAccessibilityIntersectionWithSelectionRangeAttribute)) {
+        NSRange range = [rangeAttribute rangeValue];
+        NSString *rangeDescription = [NSString stringWithFormat:@"{%lu, %lu}", static_cast<unsigned long>(range.location), static_cast<unsigned long>(range.length)];
+        return [rangeDescription createJSStringRef];
+    }
     END_AX_OBJC_EXCEPTIONS
 
     return nullptr;
@@ -2574,6 +2623,11 @@ bool AccessibilityUIElement::isFirstItemInSuggestion() const
 }
 
 bool AccessibilityUIElement::isLastItemInSuggestion() const
+{
+    return false;
+}
+
+bool AccessibilityUIElement::isInNonNativeTextControl() const
 {
     return false;
 }

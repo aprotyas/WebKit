@@ -290,8 +290,8 @@ class Heap {
 public:
     friend class JIT;
     friend class DFG::SpeculativeJIT;
-    static Heap* heap(const JSValue); // 0 for immediate values
-    static Heap* heap(const HeapCell*);
+    static JSC::Heap* heap(const JSValue); // 0 for immediate values
+    static JSC::Heap* heap(const HeapCell*);
 
     // This constant determines how many blocks we iterate between checks of our 
     // deadline when calling Heap::isPagedOut. Decreasing it will cause us to detect 
@@ -327,6 +327,10 @@ public:
 
     JS_EXPORT_PRIVATE GCActivityCallback* fullActivityCallback();
     JS_EXPORT_PRIVATE GCActivityCallback* edenActivityCallback();
+
+    JS_EXPORT_PRIVATE void setFullActivityCallback(RefPtr<GCActivityCallback>&&);
+    JS_EXPORT_PRIVATE void setEdenActivityCallback(RefPtr<GCActivityCallback>&&);
+
     JS_EXPORT_PRIVATE void setGarbageCollectionTimerEnabled(bool);
     JS_EXPORT_PRIVATE void scheduleOpportunisticFullCollection();
 
@@ -385,9 +389,13 @@ public:
 
     void completeAllJITPlans();
     
-    // Use this API to report non-GC memory referenced by GC objects. Be sure to
+    // Note that:
+    // 1. Use this API to report non-GC memory referenced by GC objects. Be sure to
     // call both of these functions: Calling only one may trigger catastropic
     // memory growth.
+    // 2. Use this API may trigger JSRopeString::resolveRope. If this API need
+    // to be used when resolving a rope string, then make sure to call this API
+    // after the rope string is completely resolved.
     void reportExtraMemoryAllocated(const JSCell*, size_t);
     void reportExtraMemoryAllocated(GCDeferralContext*, const JSCell*, size_t);
     JS_EXPORT_PRIVATE void reportExtraMemoryVisited(size_t);
@@ -567,6 +575,8 @@ public:
     {
         m_possiblyAccessedStringsFromConcurrentThreads.append(WTFMove(string));
     }
+
+    bool isInPhase(CollectorPhase phase) const { return m_currentPhase == phase; }
 
 private:
     friend class AllocatingScope;
@@ -831,7 +841,7 @@ private:
 
     Vector<String> m_possiblyAccessedStringsFromConcurrentThreads;
     
-    RefPtr<FullGCActivityCallback> m_fullActivityCallback;
+    RefPtr<GCActivityCallback> m_fullActivityCallback;
     RefPtr<GCActivityCallback> m_edenActivityCallback;
     Ref<IncrementalSweeper> m_sweeper;
     Ref<StopIfNecessaryTimer> m_stopIfNecessaryTimer;

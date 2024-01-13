@@ -52,6 +52,12 @@ struct StreamServerConnectionHandle {
     StreamConnectionBuffer::Handle buffer;
 };
 
+struct StreamServerConnectionParameters {
+#if ENABLE(IPC_TESTING_API)
+    bool ignoreInvalidMessageForTesting { false };
+#endif
+};
+
 // StreamServerConnection represents the connection between stream client and server, as used by the server.
 //
 // StreamServerConnection:
@@ -68,7 +74,7 @@ public:
     using AsyncReplyID = Connection::AsyncReplyID;
     using Handle = StreamServerConnectionHandle;
 
-    static RefPtr<StreamServerConnection> tryCreate(Handle&&);
+    static RefPtr<StreamServerConnection> tryCreate(Handle&&, const StreamServerConnectionParameters&);
     ~StreamServerConnection() final;
 
     void startReceivingMessages(StreamMessageReceiver&, ReceiverName, uint64_t destinationID);
@@ -91,6 +97,10 @@ public:
     template<typename T, typename... Arguments>
     void sendSyncReply(Connection::SyncRequestID, Arguments&&...);
 
+#if ENABLE(IPC_TESTING_API)
+    void sendDeserializationErrorSyncReply(Connection::SyncRequestID);
+#endif
+
     template<typename T, typename... Arguments>
     void sendAsyncReply(AsyncReplyID, Arguments&&...);
 
@@ -100,7 +110,7 @@ private:
     StreamServerConnection(Ref<Connection>, StreamServerConnectionBuffer&&);
 
     // MessageReceiveQueue
-    void enqueueMessage(Connection&, std::unique_ptr<Decoder>&&) final;
+    void enqueueMessage(Connection&, UniqueRef<Decoder>&&) final;
 
     // Connection::Client
     void didReceiveMessage(Connection&, Decoder&) final;
@@ -118,7 +128,7 @@ private:
     StreamServerConnectionBuffer m_buffer;
 
     Lock m_outOfStreamMessagesLock;
-    Deque<std::unique_ptr<Decoder>> m_outOfStreamMessages WTF_GUARDED_BY_LOCK(m_outOfStreamMessagesLock);
+    Deque<UniqueRef<Decoder>> m_outOfStreamMessages WTF_GUARDED_BY_LOCK(m_outOfStreamMessagesLock);
 
     bool m_isDispatchingStreamMessage { false };
     Lock m_receiversLock;

@@ -65,6 +65,8 @@ class AccessibilityObjectAtspi;
 }
 typedef WebCore::AccessibilityObjectAtspi AccessibilityObjectWrapper;
 
+#elif PLATFORM(PLAYSTATION)
+class AccessibilityObjectWrapper : public RefCounted<AccessibilityObjectWrapper> { };
 #else
 class AccessibilityObjectWrapper;
 #endif
@@ -106,8 +108,9 @@ enum class AXAncestorFlag : uint8_t {
     IsInDescriptionListDetail = 1 << 3,
     IsInDescriptionListTerm = 1 << 4,
     IsInCell = 1 << 5,
+    IsInRow = 1 << 6,
 
-    // Bits 6 and 7 are free.
+    // Bit 7 is free.
 };
 
 enum class AccessibilityRole {
@@ -175,6 +178,7 @@ enum class AccessibilityRole {
     LandmarkRegion,
     LandmarkSearch,
     Legend,
+    LineBreak,
     Link,
     List,
     ListBox,
@@ -385,6 +389,8 @@ ALWAYS_INLINE String accessibilityRoleToString(AccessibilityRole role)
         return "Legend"_s;
     case AccessibilityRole::Link:
         return "Link"_s;
+    case AccessibilityRole::LineBreak:
+        return "LineBreak"_s;
     case AccessibilityRole::List:
         return "List"_s;
     case AccessibilityRole::ListBox:
@@ -637,6 +643,8 @@ enum class AccessibilityButtonState {
     Mixed,
 };
 
+enum class AXDirection : bool { Next, Previous };
+
 enum class AccessibilitySortDirection {
     None,
     Ascending,
@@ -666,6 +674,16 @@ struct AccessibilitySearchTextCriteria {
     AccessibilitySearchTextCriteria()
         : start(AccessibilitySearchTextStartFrom::Selection)
         , direction(AccessibilitySearchTextDirection::Forward)
+    { }
+};
+
+struct AccessibilityText {
+    String text;
+    AccessibilityTextSource textSource;
+
+    AccessibilityText(const String& text, const AccessibilityTextSource& source)
+        : text(text)
+        , textSource(source)
     { }
 };
 
@@ -738,12 +756,12 @@ enum class AXRelationType : uint8_t {
     FlowsTo,
     Headers,
     HeaderFor,
-    LabelledBy,
+    LabeledBy,
     LabelFor,
     OwnedBy,
     OwnerFor,
 };
-using AXRelations = HashMap<AXRelationType, Vector<AXID>, DefaultHash<uint8_t>, WTF::UnsignedWithZeroKeyHashTraits<uint8_t>>;
+using AXRelations = HashMap<AXRelationType, ListHashSet<AXID>, DefaultHash<uint8_t>, WTF::UnsignedWithZeroKeyHashTraits<uint8_t>>;
 
 enum class SpinButtonType : bool {
     // The spin button is standalone. It has no separate controls, and should receive and perform actions itself.
@@ -774,6 +792,7 @@ public:
 
     void setObjectID(AXID axID) { m_id = axID; }
     AXID objectID() const { return m_id; }
+    virtual AXID treeID() const = 0;
     virtual ProcessID processID() const = 0;
 
     // When the corresponding WebCore object that this accessible object
@@ -816,6 +835,7 @@ public:
     virtual bool isControl() const = 0;
     // lists support (l, ul, ol, dl)
     virtual bool isList() const = 0;
+    virtual bool isFileUploadButton() const = 0;
 
     // Table support.
     virtual bool isTable() const = 0;
@@ -892,6 +912,7 @@ public:
     bool isTreeItem() const { return roleValue() == AccessibilityRole::TreeItem; }
     bool isScrollbar() const { return roleValue() == AccessibilityRole::ScrollBar; }
     bool isButton() const;
+    virtual bool isMeter() const = 0;
 
     virtual HashMap<String, AXEditingStyleValueVariant> resolvedEditingStyles() const = 0;
 
@@ -999,7 +1020,7 @@ public:
     AccessibilityChildrenVector errorMessageForObjects() const { return relatedObjects(AXRelationType::ErrorMessageFor); }
     AccessibilityChildrenVector flowToObjects() const { return relatedObjects(AXRelationType::FlowsTo); }
     AccessibilityChildrenVector flowFromObjects() const { return relatedObjects(AXRelationType::FlowsFrom); }
-    AccessibilityChildrenVector labelledByObjects() const { return relatedObjects(AXRelationType::LabelledBy); }
+    AccessibilityChildrenVector labeledByObjects() const { return relatedObjects(AXRelationType::LabeledBy); }
     AccessibilityChildrenVector labelForObjects() const { return relatedObjects(AXRelationType::LabelFor); }
     AccessibilityChildrenVector ownedObjects() const { return relatedObjects(AXRelationType::OwnerFor); }
     AccessibilityChildrenVector owners() const { return relatedObjects(AXRelationType::OwnedBy); }
@@ -1062,9 +1083,7 @@ public:
     virtual Vector<String> performTextOperation(const AccessibilityTextOperation&) = 0;
 
     virtual AccessibilityChildrenVector linkedObjects() const = 0;
-    virtual AXCoreObject* titleUIElement() const = 0;
-    virtual AXCoreObject* correspondingLabelForControlElement() const = 0;
-    virtual AXCoreObject* correspondingControlForLabelElement() const = 0;
+    virtual AXCoreObject* titleUIElement() const;
     virtual AXCoreObject* scrollBar(AccessibilityOrientation) = 0;
 
     virtual bool inheritsPresentationalRole() const = 0;
@@ -1360,12 +1379,13 @@ public:
     virtual bool preventKeyboardDOMEventDispatch() const = 0;
     virtual void setPreventKeyboardDOMEventDispatch(bool) = 0;
     virtual String speechHintAttributeValue() const = 0;
-    virtual String descriptionAttributeValue() const = 0;
+    virtual bool fileUploadButtonReturnsValueInTitle() const = 0;
+    String descriptionAttributeValue() const;
     bool shouldComputeDescriptionAttributeValue() const;
-    virtual String helpTextAttributeValue() const = 0;
+    String helpTextAttributeValue() const;
     // This should be the visible text that's actually on the screen if possible.
     // If there's alternative text, that can override the title.
-    virtual String titleAttributeValue() const = 0;
+    String titleAttributeValue() const;
     bool shouldComputeTitleAttributeValue() const;
 
     virtual bool hasApplePDFAnnotationAttribute() const = 0;
@@ -1406,6 +1426,8 @@ private:
     RetainPtr<WebAccessibilityObjectWrapper> m_wrapper;
 #elif PLATFORM(WIN)
     COMPtr<AccessibilityObjectWrapper> m_wrapper;
+#elif PLATFORM(PLAYSTATION)
+    RefPtr<AccessibilityObjectWrapper> m_wrapper;
 #elif USE(ATSPI)
     RefPtr<AccessibilityObjectAtspi> m_wrapper;
 #endif

@@ -724,11 +724,7 @@ static inline const FilterOperations& filterOperationsAt(const KeyframeValueList
 
 int GraphicsLayer::validateFilterOperations(const KeyframeValueList& valueList)
 {
-#if ENABLE(FILTERS_LEVEL_2)
     ASSERT(valueList.property() == AnimatedProperty::Filter || valueList.property() == AnimatedProperty::WebkitBackdropFilter);
-#else
-    ASSERT(valueList.property() == AnimatedProperty::Filter);
-#endif
 
     if (valueList.size() < 2)
         return -1;
@@ -768,7 +764,7 @@ void GraphicsLayer::setAcceleratedEffectsAndBaseValues(AcceleratedEffects&& effe
     }
 
     if (!m_effectStack)
-        m_effectStack = makeUnique<AcceleratedEffectStack>();
+        m_effectStack = AcceleratedEffectStack::create();
 
     m_effectStack->setEffects(WTFMove(effects));
     m_effectStack->setBaseValues(WTFMove(baseValues));
@@ -874,10 +870,8 @@ void GraphicsLayer::dumpProperties(TextStream& ts, OptionSet<LayerTreeAsTextOpti
     if (m_opacity != 1)
         ts << indent << "(opacity " << m_opacity << ")\n";
 
-#if ENABLE(CSS_COMPOSITING)
     if (m_blendMode != BlendMode::Normal)
         ts << indent << "(blendMode " << compositeOperatorName(CompositeOperator::SourceOver, m_blendMode) << ")\n";
-#endif
 
     if (type() == Type::Normal && tiledBacking())
         ts << indent << "(usingTiledLayer 1)\n";

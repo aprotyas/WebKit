@@ -6391,15 +6391,9 @@ public:
         WTF::unalignedStore<int32_t>(ptr + 1, static_cast<int32_t>(distance));
     }
 
-    // FIXME: Indirection needed to work around GCC error in Debian 11.
-    static void* memcpyWrapper(void* dest, const void* src, size_t n)
-    {
-        return memcpy(dest, src, n);
-    }
-
     static void replaceWithNops(void* instructionStart, size_t memoryToFillWithNopsInBytes)
     {
-        fillNops<memcpyWrapper>(instructionStart, memoryToFillWithNopsInBytes);
+        fillNops<MachineCodeCopyMode::Memcpy>(instructionStart, memoryToFillWithNopsInBytes);
     }
 
     static ptrdiff_t maxJumpReplacementSize()
@@ -6513,9 +6507,7 @@ public:
         m_formatter.oneByteOp(OP_NOP);
     }
 
-    using CopyFunction = void*(&)(void*, const void*, size_t);
-
-    template <CopyFunction copy>
+    template<MachineCodeCopyMode copy>
     static void fillNops(void* base, size_t size)
     {
         UNUSED_PARAM(copy);

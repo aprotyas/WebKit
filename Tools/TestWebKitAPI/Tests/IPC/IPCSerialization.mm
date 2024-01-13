@@ -34,11 +34,17 @@
 #import <Foundation/NSValue.h>
 #import <WebCore/FontCocoa.h>
 #import <limits.h>
-#import <pal/cocoa/DataDetectorsCoreSoftLink.h>
+#import <pal/spi/cocoa/ContactsSPI.h>
 #import <wtf/RetainPtr.h>
 #import <wtf/cocoa/TypeCastsCocoa.h>
 #import <wtf/spi/cocoa/SecuritySPI.h>
 #import <wtf/text/Base64.h>
+
+#import <pal/cocoa/AVFoundationSoftLink.h>
+#import <pal/cocoa/ContactsSoftLink.h>
+#import <pal/cocoa/DataDetectorsCoreSoftLink.h>
+#import <pal/cocoa/PassKitSoftLink.h>
+#import <pal/mac/DataDetectorsSoftLink.h>
 
 // This test makes it trivial to test round trip encoding and decoding of a particular object type.
 // The primary focus here is Objective-C and similar types - Objects that exist on the platform or in
@@ -148,8 +154,21 @@ struct ObjCHolderForTesting {
         RetainPtr<NSDictionary>,
         RetainPtr<WebCore::CocoaFont>,
         RetainPtr<NSError>,
+        RetainPtr<NSLocale>,
 #if ENABLE(DATA_DETECTION)
+#if PLATFORM(MAC)
+        RetainPtr<WKDDActionContext>,
+#endif
         RetainPtr<DDScannerResult>,
+#endif
+#if USE(AVFOUNDATION)
+        RetainPtr<AVOutputContext>,
+#endif
+        RetainPtr<NSPersonNameComponents>,
+#if USE(PASSKIT) && !PLATFORM(WATCHOS)
+        RetainPtr<CNPhoneNumber>,
+        RetainPtr<CNPostalAddress>,
+        RetainPtr<PKContact>,
 #endif
         RetainPtr<NSValue>
     > ValueType;
@@ -174,6 +193,27 @@ std::optional<ObjCHolderForTesting> ObjCHolderForTesting::decode(IPC::Decoder& d
     } };
 }
 
+#if PLATFORM(MAC)
+inline bool isEqual(WKDDActionContext *a, WKDDActionContext* b)
+{
+    if (![a.authorNameComponents isEqual:b.authorNameComponents])
+        return false;
+    if (!CFEqual(a.mainResult, b.mainResult))
+        return false;
+    if (a.allResults.count != b.allResults.count)
+        return false;
+    for (size_t i = 0; i < a.allResults.count; ++i) {
+        if (!CFEqual((__bridge DDResultRef)a.allResults[i], (__bridge DDResultRef)b.allResults[i]))
+            return false;
+    }
+
+    if (!NSEqualRects(a.highlightFrame, b.highlightFrame))
+        return false;
+
+    return true;
+}
+#endif
+
 inline bool operator==(const ObjCHolderForTesting& a, const ObjCHolderForTesting& b)
 {
     id aObject = a.valueAsID();
@@ -181,6 +221,12 @@ inline bool operator==(const ObjCHolderForTesting& a, const ObjCHolderForTesting
 
     EXPECT_TRUE(aObject != nil);
     EXPECT_TRUE(bObject != nil);
+
+#if PLATFORM(MAC)
+    // DDActionContext doesn't have an isEqual: reliable for our unit testing, so do it ourselves.
+    if ([aObject isKindOfClass:PAL::getWKDDActionContextClass()] && [bObject isKindOfClass:PAL::getWKDDActionContextClass()])
+        return isEqual(aObject, bObject);
+#endif
 
     return [aObject isEqual:bObject];
 }
@@ -344,6 +390,26 @@ static RetainPtr<SecKeyRef> createPrivateKey()
     auto privateKey = adoptCF(SecKeyCreateWithData((CFDataRef)keyData, (CFDictionaryRef)keyAttrs, NULL));
     EXPECT_NOT_NULL(privateKey);
     return privateKey;
+}
+
+static RetainPtr<NSPersonNameComponents> personNameComponentsForTesting()
+{
+    auto phoneticComponents = adoptNS([[NSPersonNameComponents alloc] init]);
+    phoneticComponents.get().familyName = @"Family";
+    phoneticComponents.get().middleName = @"Middle";
+    phoneticComponents.get().namePrefix = @"Doctor";
+    phoneticComponents.get().givenName = @"Given";
+    phoneticComponents.get().nickname = @"Buddy";
+
+    auto components = adoptNS([[NSPersonNameComponents alloc] init]);
+    components.get().familyName = @"Familia";
+    components.get().middleName = @"Median";
+    components.get().namePrefix = @"Physician";
+    components.get().givenName = @"Gifted";
+    components.get().nickname = @"Pal";
+    components.get().phoneticRepresentation = phoneticComponents.get();
+
+    return components;
 }
 
 TEST(IPCSerialization, Basic)
@@ -517,6 +583,56 @@ TEST(IPCSerialization, Basic)
     EXPECT_EQ([[[error12.get() userInfo] objectForKey:@"NSErrorPeerCertificateChainKey"] count], (NSUInteger)1);
     runTestNS({ (NSError *)error12.get() });
 
+    // NSLocale
+    for (NSString* identifier : [NSLocale availableLocaleIdentifiers])
+        runTestNS({ [NSLocale localeWithLocaleIdentifier: identifier] });
+
+    // NSPersonNameComponents
+    auto components = personNameComponentsForTesting();
+    runTestNS({ components.get().phoneticRepresentation });
+    runTestNS({ components.get() });
+
+#if USE(PASSKIT) && !PLATFORM(WATCHOS)
+    // CNPhoneNumber
+    RetainPtr<CNPhoneNumber> phoneNumber = [PAL::getCNPhoneNumberClass() phoneNumberWithDigits:@"4085551234" countryCode:@"us"];
+    runTestNS({ phoneNumber.get() });
+
+    // CNPostalAddress
+    RetainPtr<CNMutablePostalAddress> address = adoptNS([PAL::getCNMutablePostalAddressClass() new]);
+    address.get().street = @"1 Apple Park Way";
+    address.get().subLocality = @"Birdland";
+    address.get().city = @"Cupertino";
+    address.get().subAdministrativeArea = @"Santa Clara County";
+    address.get().state = @"California";
+    address.get().postalCode = @"95014";
+    address.get().country = @"United States of America";
+    address.get().ISOCountryCode = @"US";
+    address.get().formattedAddress = @"Hello world";
+    runTestNS({ address.get() });
+
+    // PKContact
+    RetainPtr<PKContact> contact = adoptNS([PAL::getPKContactClass() new]);
+    contact.get().name = components.get();
+    contact.get().emailAddress = @"admin@webkit.org";
+    contact.get().phoneNumber = phoneNumber.get();
+    contact.get().postalAddress = address.get();
+ALLOW_DEPRECATED_DECLARATIONS_BEGIN
+    contact.get().supplementarySubLocality = @"City 17";
+ALLOW_DEPRECATED_DECLARATIONS_END
+    runTestNS({ contact.get() });
+#endif // USE(PASSKIT) && !PLATFORM(WATCHOS)
+
+
+    // CFURL
+    // The following URL described is quite nonsensical.
+    const UInt8 baseBytes[10] = { 'h', 't', 't', 'p', ':', '/', '/', 0xE2, 0x80, 0x80 };
+    auto baseURL = adoptCF(CFURLCreateAbsoluteURLWithBytes(nullptr, baseBytes, 10, kCFStringEncodingUTF8, nullptr, true));
+    const UInt8 compoundBytes[10] = { 'p', 'a', 't', 'h' };
+    auto compoundURL = adoptCF(CFURLCreateAbsoluteURLWithBytes(nullptr, compoundBytes, 4, kCFStringEncodingUTF8, baseURL.get(), true));
+    runTestCF({ baseURL.get() });
+    runTestCF({ compoundURL.get() });
+
+
     auto runValueTest = [&](NSValue *value) {
         ObjCHolderForTesting::ValueType valueVariant;
         valueVariant.emplace<RetainPtr<NSValue>>(value);
@@ -525,12 +641,14 @@ TEST(IPCSerialization, Basic)
 
     // NSValue, wrapping any of the following classes:
     //   - NSRange
+    //   - NSRect
     runValueTest([NSValue valueWithRange:NSMakeRange(1, 2)]);
+    runValueTest([NSValue valueWithRect:NSMakeRect(1, 2, 79, 80)]);
 }
 
 #if PLATFORM(MAC)
 
-static DDScannerResult *fakeDataDetectorResultForTesting()
+static RetainPtr<DDScannerResult> fakeDataDetectorResultForTesting()
 {
     auto scanner = adoptCF(PAL::softLink_DataDetectorsCore_DDScannerCreate(DDScannerTypeStandard, 0, nullptr));
     auto stringToScan = CFSTR("webkit.org");
@@ -562,7 +680,24 @@ TEST(IPCSerialization, SecureCoding)
 
     // DDScannerResult
     //   - Note: For now, there's no reasonable way to create anything but an empty DDScannerResult object
-    runTestNS({ fakeDataDetectorResultForTesting() });
+    auto scannerResult = fakeDataDetectorResultForTesting();
+    runTestNS({ scannerResult.get() });
+
+    // DDActionContext/DDSecureActionContext
+    auto actionContext = adoptNS([PAL::allocWKDDActionContextInstance() init]);
+    [actionContext setAllResults:@[ (__bridge id)scannerResult.get().coreResult ]];
+    [actionContext setMainResult:scannerResult.get().coreResult];
+    auto components = personNameComponentsForTesting();
+    [actionContext setAuthorNameComponents:components.get()];
+    [actionContext setHighlightFrame:NSMakeRect(1, 2, 3, 4)];
+
+    runTestNS({ actionContext.get() });
+
+    // AVOutputContext
+#if USE(AVFOUNDATION)
+    RetainPtr<AVOutputContext> outputContext = adoptNS([[PAL::getAVOutputContextClass() alloc] init]);
+    runTestNS({ outputContext.get() });
+#endif // USE(AVFOUNDATION)
 }
 
 #endif // PLATFORM(MAC)

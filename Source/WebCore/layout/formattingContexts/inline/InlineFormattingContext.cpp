@@ -75,6 +75,12 @@ static std::optional<InlineItemRange> partialRangeForDamage(const InlineItemList
     return InlineItemRange { damageStartPosition, { inlineItemList.size(), 0 } };
 }
 
+static bool isEmptyInlineContent(const InlineItemList& inlineItemList)
+{
+    // Very common, pseudo before/after empty content.
+    return inlineItemList.size() == 1 && is<InlineTextItem>(inlineItemList[0]) && !downcast<InlineTextItem>(inlineItemList[0]).length();
+}
+
 InlineFormattingContext::InlineFormattingContext(const ElementBox& rootBlockContainer, LayoutState& layoutState, BlockLayoutState& parentBlockLayoutState)
     : m_rootBlockContainer(rootBlockContainer)
     , m_layoutState(layoutState)
@@ -97,16 +103,12 @@ InlineLayoutResult InlineFormattingContext::layout(const ConstraintsForInlineCon
         return { { }, InlineLayoutResult::Range::Full };
     }
 
-    auto& inlineContentCache = this->inlineContentCache();
-    auto needsInlineItemListUpdate = inlineContentCache.inlineItems().isEmpty() || lineDamage;
-    if (needsInlineItemListUpdate) {
+    if (rebuildInlineItemListIfNeeded(lineDamage)) {
         // FIXME: This should go to invalidation.
-        inlineContentCache.clearMaximumIntrinsicWidthLayoutResult();
-        auto startPosition = !lineDamage || !lineDamage->start() ? InlineItemPosition() : lineDamage->start()->inlineItemPosition;
-        InlineItemsBuilder { inlineContentCache, root() }.build(startPosition);
+        inlineContentCache().clearMaximumIntrinsicWidthLayoutResult();
     }
 
-    auto& inlineItemList = inlineContentCache.inlineItems().content();
+    auto& inlineItemList = inlineContentCache().inlineItems().content();
     auto needsLayoutRange = InlineItemRange { { }, { inlineItemList.size(), 0 } };
     if (lineDamage) {
         if (auto partialRange = partialRangeForDamage(inlineItemList, *lineDamage))
@@ -140,7 +142,7 @@ InlineLayoutResult InlineFormattingContext::layout(const ConstraintsForInlineCon
             layoutState().setAvailableLineWidthOverride({ *balancedLineWidths });
     }
 
-    if (TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), this->inlineContentCache(), &placedFloats)) {
+    if (TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineContentCache(), &placedFloats)) {
         auto simplifiedLineBuilder = TextOnlySimpleLineBuilder { *this, constraints.horizontal(), inlineItemList };
         return lineLayout(simplifiedLineBuilder, inlineItemList, needsLayoutRange, previousLine(), constraints, lineDamage);
     }
@@ -148,37 +150,70 @@ InlineLayoutResult InlineFormattingContext::layout(const ConstraintsForInlineCon
     return lineLayout(lineBuilder, inlineItemList, needsLayoutRange, previousLine(), constraints, lineDamage);
 }
 
-IntrinsicWidthConstraints InlineFormattingContext::computedIntrinsicSizes(const InlineDamage* lineDamage)
+std::pair<LayoutUnit, LayoutUnit> InlineFormattingContext::minimumMaximumContentSize(const InlineDamage* lineDamage)
 {
     auto& inlineContentCache = this->inlineContentCache();
-    if (lineDamage)
-        inlineContentCache.resetIntrinsicWidthConstraints();
+    auto minimumContentSize = inlineContentCache.minimumContentSize();
+    auto maximumContentSize = inlineContentCache.maximumContentSize();
 
-    if (auto intrinsicSizes = inlineContentCache.intrinsicWidthConstraints())
-        return *intrinsicSizes;
+    if (minimumContentSize && maximumContentSize)
+        return { ceiledLayoutUnit(*minimumContentSize), ceiledLayoutUnit(*maximumContentSize) };
 
-    auto needsLayoutStartPosition = !lineDamage || !lineDamage->start() ? InlineItemPosition() : lineDamage->start()->inlineItemPosition;
-    auto needsInlineItemListUpdate = inlineContentCache.inlineItems().isEmpty() || lineDamage;
-    if (needsInlineItemListUpdate)
-        InlineItemsBuilder { inlineContentCache, root() }.build(needsLayoutStartPosition);
+    rebuildInlineItemListIfNeeded(lineDamage);
+    auto& inlineItemList = inlineContentCache.inlineItems().content();
 
-    auto mayUseSimplifiedTextOnlyInlineLayout = TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineContentCache);
-    auto intrinsicWidthHandler = IntrinsicWidthHandler { *this, inlineContentCache.inlineItems().content(), mayUseSimplifiedTextOnlyInlineLayout };
-    auto intrinsicSizes = intrinsicWidthHandler.computedIntrinsicSizes();
-    inlineContentCache.setIntrinsicWidthConstraints(intrinsicSizes);
-    if (intrinsicWidthHandler.maximumIntrinsicWidthResult())
-        inlineContentCache.setMaximumIntrinsicWidthLayoutResult(WTFMove(*intrinsicWidthHandler.maximumIntrinsicWidthResult()));
-    return intrinsicSizes;
+    if (!isEmptyInlineContent(inlineItemList)) {
+        auto intrinsicWidthHandler = IntrinsicWidthHandler { *this, inlineItemList, TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineContentCache) };
+
+        if (!minimumContentSize)
+            minimumContentSize = intrinsicWidthHandler.minimumContentSize();
+        if (!maximumContentSize) {
+            maximumContentSize = intrinsicWidthHandler.maximumContentSize();
+            if (intrinsicWidthHandler.maximumIntrinsicWidthResult())
+                inlineContentCache.setMaximumIntrinsicWidthLayoutResult(WTFMove(*intrinsicWidthHandler.maximumIntrinsicWidthResult()));
+        }
+    } else {
+        minimumContentSize = minimumContentSize.value_or(0.f);
+        maximumContentSize = maximumContentSize.value_or(0.f);
+    }
+    inlineContentCache.setMinimumContentSize(*minimumContentSize);
+    inlineContentCache.setMaximumContentSize(*maximumContentSize);
+    return { ceiledLayoutUnit(*minimumContentSize), ceiledLayoutUnit(*maximumContentSize) };
 }
 
-LayoutUnit InlineFormattingContext::maximumContentSize()
+LayoutUnit InlineFormattingContext::minimumContentSize(const InlineDamage* lineDamage)
 {
     auto& inlineContentCache = this->inlineContentCache();
-    if (auto intrinsicWidthConstraints = inlineContentCache.intrinsicWidthConstraints())
-        return intrinsicWidthConstraints->maximum;
+    if (inlineContentCache.minimumContentSize())
+        return ceiledLayoutUnit(*inlineContentCache.minimumContentSize());
 
-    auto mayUseSimplifiedTextOnlyInlineLayout = TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineContentCache);
-    return IntrinsicWidthHandler { *this, inlineContentCache.inlineItems().content(), mayUseSimplifiedTextOnlyInlineLayout }.maximumContentSize();
+    rebuildInlineItemListIfNeeded(lineDamage);
+    auto& inlineItemList = inlineContentCache.inlineItems().content();
+    auto minimumContentSize = InlineLayoutUnit { };
+    if (!isEmptyInlineContent(inlineItemList))
+        minimumContentSize = IntrinsicWidthHandler { *this, inlineItemList, TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineContentCache) }.minimumContentSize();
+    inlineContentCache.setMinimumContentSize(minimumContentSize);
+    return ceiledLayoutUnit(minimumContentSize);
+}
+
+LayoutUnit InlineFormattingContext::maximumContentSize(const InlineDamage* lineDamage)
+{
+    auto& inlineContentCache = this->inlineContentCache();
+    if (inlineContentCache.maximumContentSize())
+        return ceiledLayoutUnit(*inlineContentCache.maximumContentSize());
+
+    rebuildInlineItemListIfNeeded(lineDamage);
+    auto& inlineItemList = inlineContentCache.inlineItems().content();
+    auto maximumContentSize = InlineLayoutUnit { };
+    if (!isEmptyInlineContent(inlineItemList)) {
+        auto intrinsicWidthHandler = IntrinsicWidthHandler { *this, inlineItemList, TextOnlySimpleLineBuilder::isEligibleForSimplifiedTextOnlyInlineLayout(root(), inlineContentCache) };
+
+        maximumContentSize = intrinsicWidthHandler.maximumContentSize();
+        if (intrinsicWidthHandler.maximumIntrinsicWidthResult())
+            inlineContentCache.setMaximumIntrinsicWidthLayoutResult(WTFMove(*intrinsicWidthHandler.maximumIntrinsicWidthResult()));
+    }
+    inlineContentCache.setMaximumContentSize(maximumContentSize);
+    return ceiledLayoutUnit(maximumContentSize);
 }
 
 static bool mayExitFromPartialLayout(const InlineDamage& lineDamage, size_t lineIndex, const InlineDisplay::Boxes& newContent)
@@ -196,21 +231,27 @@ InlineLayoutResult InlineFormattingContext::lineLayout(AbstractLineBuilder& line
 {
     ASSERT(!needsLayoutRange.isEmpty());
 
+    auto isPartialLayout = lineDamage && lineDamage->start();
+    if (!isPartialLayout) {
+        ASSERT(!previousLine);
+        auto layoutResult = InlineLayoutResult { { }, InlineLayoutResult::Range::Full };
+        if (createDisplayContentForLineFromCachedContent(constraints, layoutResult))
+            return layoutResult;
+        if (isEmptyInlineContent(inlineItemList)) {
+            createDisplayContentForEmptyInlineContent(constraints, layoutResult);
+            return layoutResult;
+        }
+    }
+
     auto layoutResult = InlineLayoutResult { };
     if (!needsLayoutRange.start)
         layoutResult.displayContent.boxes.reserveInitialCapacity(inlineItemList.size());
-
-    auto isPartialLayout = lineDamage && lineDamage->start();
-    if (!isPartialLayout && createDisplayContentForLineFromCachedContent(constraints, layoutResult)) {
-        ASSERT(!previousLine);
-        layoutResult.range = InlineLayoutResult::Range::Full;
-        return layoutResult;
-    }
 
     auto floatingContext = this->floatingContext();
     auto lineLogicalTop = InlineLayoutUnit { constraints.logicalTop() };
     auto previousLineEnd = std::optional<InlineItemPosition> { };
     auto leadingInlineItemPosition = needsLayoutRange.start;
+    size_t numberOfLinesWithInlineContent = 0;
     while (true) {
 
         auto lineInitialRect = InlineRect { lineLogicalTop, constraints.horizontal().logicalLeft, constraints.horizontal().logicalWidth, formattingUtils().initialLineHeight(!previousLine.has_value()) };
@@ -219,7 +260,7 @@ InlineLayoutResult InlineFormattingContext::lineLayout(AbstractLineBuilder& line
 
         auto lineLayoutResult = lineBuilder.layoutInlineContent(lineInput, previousLine);
         auto lineBox = LineBoxBuilder { *this, lineLayoutResult }.build(lineIndex);
-        auto lineLogicalRect = createDisplayContentForInlineContent(lineBox, lineLayoutResult, constraints, layoutResult.displayContent);
+        auto lineLogicalRect = createDisplayContentForInlineContent(lineBox, lineLayoutResult, constraints, layoutResult.displayContent, numberOfLinesWithInlineContent);
         updateBoxGeometryForPlacedFloats(lineLayoutResult.floatContent.placedFloats);
         updateInlineLayoutStateWithLineLayoutResult(lineLayoutResult, lineLogicalRect, floatingContext);
 
@@ -235,8 +276,10 @@ InlineLayoutResult InlineFormattingContext::lineLayout(AbstractLineBuilder& line
             break;
         }
 
-        auto hasSeenInlineContent = previousLine ? previousLine->hasInlineContent || !lineLayoutResult.inlineContent.isEmpty() : !lineLayoutResult.inlineContent.isEmpty();
-        previousLine = PreviousLine { lineIndex, lineLayoutResult.contentGeometry.trailingOverflowingContentWidth, !lineLayoutResult.inlineContent.isEmpty() && lineLayoutResult.inlineContent.last().isLineBreak(), hasSeenInlineContent, lineLayoutResult.directionality.inlineBaseDirection, WTFMove(lineLayoutResult.floatContent.suspendedFloats) };
+        auto lineHasInlineContent = !lineLayoutResult.inlineContent.isEmpty();
+        numberOfLinesWithInlineContent += lineHasInlineContent ? 1 : 0;
+        auto hasEverSeenInlineContent = lineHasInlineContent || (previousLine && previousLine->hasInlineContent);
+        previousLine = PreviousLine { lineIndex, lineLayoutResult.contentGeometry.trailingOverflowingContentWidth, lineHasInlineContent && lineLayoutResult.inlineContent.last().isLineBreak(), hasEverSeenInlineContent, lineLayoutResult.directionality.inlineBaseDirection, WTFMove(lineLayoutResult.floatContent.suspendedFloats) };
         previousLineEnd = lineContentEnd;
         lineLogicalTop = formattingUtils().logicalTopForNextLine(lineLayoutResult, lineLogicalRect, floatingContext);
     }
@@ -271,21 +314,6 @@ void InlineFormattingContext::layoutFloatContentOnly(const ConstraintsForInlineC
     }
 }
 
-static LineEndingEllipsisPolicy lineEndingEllipsisPolicy(const RenderStyle& rootStyle, size_t numberOfLines, std::optional<size_t> numberOfVisibleLinesAllowed)
-{
-    // We may have passed the line-clamp line with overflow visible.
-    if (numberOfVisibleLinesAllowed && numberOfLines < *numberOfVisibleLinesAllowed) {
-        // If the next call to layoutInlineContent() won't produce a line with content (e.g. only floats), we'll end up here again.
-        auto shouldApplyClampWhenApplicable = *numberOfVisibleLinesAllowed - numberOfLines == 1;
-        if (shouldApplyClampWhenApplicable)
-            return LineEndingEllipsisPolicy::WhenContentOverflowsInBlockDirection;
-    }
-    // Truncation is in effect when the block container has overflow other than visible.
-    if (rootStyle.overflowX() != Overflow::Visible && rootStyle.textOverflow() == TextOverflow::Ellipsis)
-        return LineEndingEllipsisPolicy::WhenContentOverflowsInInlineDirection;
-    return LineEndingEllipsisPolicy::No;
-}
-
 void InlineFormattingContext::updateInlineLayoutStateWithLineLayoutResult(const LineLayoutResult& lineLayoutResult, const InlineRect& lineLogicalRect, const FloatingContext& floatingContext)
 {
     if (auto firstLineGap = lineLayoutResult.lineGeometry.initialLetterClearGap) {
@@ -315,24 +343,23 @@ void InlineFormattingContext::updateBoxGeometryForPlacedFloats(const LineLayoutR
     }
 }
 
-InlineRect InlineFormattingContext::createDisplayContentForInlineContent(const LineBox& lineBox, const LineLayoutResult& lineLayoutResult, const ConstraintsForInlineContent& constraints, InlineDisplay::Content& displayContent)
+InlineRect InlineFormattingContext::createDisplayContentForInlineContent(const LineBox& lineBox, const LineLayoutResult& lineLayoutResult, const ConstraintsForInlineContent& constraints, InlineDisplay::Content& displayContent, size_t numberOfPreviousLinesWithInlineContent)
 {
-    auto lineIndex = lineBox.lineIndex();
     auto numberOfVisibleLinesAllowed = [&] () -> std::optional<size_t> {
         if (auto lineClamp = layoutState().parentBlockLayoutState().lineClamp())
             return lineClamp->maximumLineCount > lineClamp->currentLineCount ? lineClamp->maximumLineCount - lineClamp->currentLineCount : 0;
         return { };
     }();
-
-    auto lineIsFullyTruncatedInBlockDirection = numberOfVisibleLinesAllowed && lineIndex + 1 > *numberOfVisibleLinesAllowed;
+    auto numberOfLinesWithInlineContent = numberOfPreviousLinesWithInlineContent + (!lineLayoutResult.inlineContent.isEmpty() ? 1 : 0);
+    auto lineIsFullyTruncatedInBlockDirection = numberOfVisibleLinesAllowed && numberOfLinesWithInlineContent > *numberOfVisibleLinesAllowed;
     auto displayLine = InlineDisplayLineBuilder { *this, constraints }.build(lineLayoutResult, lineBox, lineIsFullyTruncatedInBlockDirection);
-    auto boxes = InlineDisplayContentBuilder { *this, constraints, displayLine, lineIndex }.build(lineLayoutResult, lineBox);
+    auto boxes = InlineDisplayContentBuilder { *this, constraints, lineBox, displayLine }.build(lineLayoutResult);
 
-    auto ellipsisPolicy = lineEndingEllipsisPolicy(root().style(), lineIndex, numberOfVisibleLinesAllowed);
+    auto ellipsisPolicy = InlineFormattingUtils::lineEndingEllipsisPolicy(root().style(), numberOfLinesWithInlineContent, numberOfVisibleLinesAllowed);
     if (auto ellipsisRect = InlineDisplayLineBuilder::trailingEllipsisVisualRectAfterTruncation(ellipsisPolicy, displayLine, boxes, lineLayoutResult.isFirstLast.isLastLineWithInlineContent)) {
         displayLine.setEllipsisVisualRect(*ellipsisRect);
         if (ellipsisPolicy == LineEndingEllipsisPolicy::WhenContentOverflowsInBlockDirection)
-            layoutState().setClampedLineIndex(lineIndex);
+            layoutState().setClampedLineIndex(lineBox.lineIndex());
     }
 
     displayContent.boxes.appendVector(WTFMove(boxes));
@@ -378,6 +405,8 @@ bool InlineFormattingContext::createDisplayContentForLineFromCachedContent(const
 
     auto& lineBreakingResult = maximumIntrinsicWidthResultForSingleLine->result;
     auto restoreTrimmedTrailingWhitespaceIfApplicable = [&] {
+        // Special 'line-break: after-white-space' behavior where min/max width trims trailing whitespace, while
+        // layout should preserve _overflowing_ trailing whitespace.
         if (root().style().lineBreak() != LineBreak::AfterWhiteSpace || !lineBreakingResult.trimmedTrailingWhitespaceWidth)
             return;
         if (ceiledLayoutUnit(lineBreakingResult.contentGeometry.logicalWidth) + LayoutUnit::epsilon() <= horizontalAvailableSpace)
@@ -399,6 +428,14 @@ bool InlineFormattingContext::createDisplayContentForLineFromCachedContent(const
     auto lineBox = LineBoxBuilder { *this, lineBreakingResult }.build({ });
     createDisplayContentForInlineContent(lineBox, lineBreakingResult, constraints, layoutResult.displayContent);
     return true;
+}
+
+void InlineFormattingContext::createDisplayContentForEmptyInlineContent(const ConstraintsForInlineContent& constraints, InlineLayoutResult& layoutResult)
+{
+    auto emptyLineBreakingResult =  LineLayoutResult { };
+    emptyLineBreakingResult.lineGeometry = { { constraints.horizontal().logicalLeft, constraints.logicalTop() }, { constraints.horizontal().logicalWidth } };
+    auto lineBox = LineBoxBuilder { *this, emptyLineBreakingResult }.build({ });
+    createDisplayContentForInlineContent(lineBox, emptyLineBreakingResult, constraints, layoutResult.displayContent);
 }
 
 void InlineFormattingContext::initializeInlineLayoutState(const LayoutState& layoutState)
@@ -443,6 +480,18 @@ BoxGeometry& InlineFormattingContext::geometryForBox(const Box& layoutBox, std::
 {
     ASSERT_UNUSED(escapeReason, isOkToAccessBoxGeometry(layoutBox, root(), escapeReason));
     return m_layoutState.ensureGeometryForBox(layoutBox);
+}
+
+bool InlineFormattingContext::rebuildInlineItemListIfNeeded(const InlineDamage* lineDamage)
+{
+    auto& inlineContentCache = this->inlineContentCache();
+    auto inlineItemListNeedsUpdate = inlineContentCache.inlineItems().isEmpty() || lineDamage;
+    if (!inlineItemListNeedsUpdate)
+        return false;
+
+    auto needsLayoutStartPosition = !lineDamage || !lineDamage->start() ? InlineItemPosition() : lineDamage->start()->inlineItemPosition;
+    InlineItemsBuilder { inlineContentCache, root() }.build(needsLayoutStartPosition);
+    return true;
 }
 
 }

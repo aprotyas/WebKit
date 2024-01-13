@@ -51,8 +51,8 @@ struct Styleable {
 
     static const Styleable fromElement(Element& element)
     {
-        if (is<PseudoElement>(element))
-            return Styleable(*downcast<PseudoElement>(element).hostElement(), element.pseudoId());
+        if (auto* pseudoElement = dynamicDowncast<PseudoElement>(element))
+            return Styleable(*pseudoElement->hostElement(), element.pseudoId());
         return Styleable(element, element.pseudoId());
     }
 
@@ -151,6 +151,16 @@ struct Styleable {
     void setLastStyleChangeEventStyle(std::unique_ptr<const RenderStyle>&& style) const
     {
         element.setLastStyleChangeEventStyle(pseudoId, WTFMove(style));
+    }
+
+    bool hasPropertiesOverridenAfterAnimation() const
+    {
+        return element.hasPropertiesOverridenAfterAnimation(pseudoId);
+    }
+
+    void setHasPropertiesOverridenAfterAnimation(bool value) const
+    {
+        element.setHasPropertiesOverridenAfterAnimation(pseudoId, value);
     }
 
     void keyframesRuleDidChange() const

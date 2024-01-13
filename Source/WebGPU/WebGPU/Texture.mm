@@ -139,6 +139,7 @@ static std::optional<WGPUFeatureName> featureRequirementForFormat(WGPUTextureFor
     case WGPUTextureFormat_Depth32Float:
         return std::nullopt;
     case WGPUTextureFormat_Undefined:
+        return std::nullopt;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return std::nullopt;
@@ -247,6 +248,7 @@ bool Texture::isCompressedFormat(WGPUTextureFormat format)
     case WGPUTextureFormat_Depth32FloatStencil8:
         return false;
     case WGPUTextureFormat_Undefined:
+        return false;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return false;
@@ -361,6 +363,7 @@ static std::optional<WGPUTextureFormat> depthSpecificFormat(WGPUTextureFormat te
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return std::nullopt;
     case WGPUTextureFormat_Undefined:
+        return std::nullopt;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return std::nullopt;
@@ -475,6 +478,7 @@ static std::optional<WGPUTextureFormat> stencilSpecificFormat(WGPUTextureFormat 
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return std::nullopt;
     case WGPUTextureFormat_Undefined:
+        return std::nullopt;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return std::nullopt;
@@ -606,6 +610,7 @@ uint32_t Texture::texelBlockWidth(WGPUTextureFormat format)
     case WGPUTextureFormat_Depth32FloatStencil8:
         return 1;
     case WGPUTextureFormat_Undefined:
+        return 0;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return 0;
@@ -726,13 +731,235 @@ uint32_t Texture::texelBlockHeight(WGPUTextureFormat format)
     case WGPUTextureFormat_Depth32FloatStencil8:
         return 1;
     case WGPUTextureFormat_Undefined:
+        return 0;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return 0;
     }
 }
 
-static bool isRenderableFormat(WGPUTextureFormat format)
+bool Texture::isColorRenderableFormat(WGPUTextureFormat format, const Device& device)
+{
+    // https://gpuweb.github.io/gpuweb/#renderable-format
+    switch (format) {
+    case WGPUTextureFormat_R8Unorm:
+    case WGPUTextureFormat_R8Uint:
+    case WGPUTextureFormat_R8Sint:
+    case WGPUTextureFormat_R16Uint:
+    case WGPUTextureFormat_R16Sint:
+    case WGPUTextureFormat_R16Float:
+    case WGPUTextureFormat_RG8Unorm:
+    case WGPUTextureFormat_RG8Uint:
+    case WGPUTextureFormat_RG8Sint:
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
+    case WGPUTextureFormat_RG16Uint:
+    case WGPUTextureFormat_RG16Sint:
+    case WGPUTextureFormat_RG16Float:
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA8UnormSrgb:
+    case WGPUTextureFormat_RGBA8Uint:
+    case WGPUTextureFormat_RGBA8Sint:
+    case WGPUTextureFormat_BGRA8Unorm:
+    case WGPUTextureFormat_BGRA8UnormSrgb:
+    case WGPUTextureFormat_RGB10A2Uint:
+    case WGPUTextureFormat_RGB10A2Unorm:
+    case WGPUTextureFormat_RG32Float:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+    case WGPUTextureFormat_RGBA16Uint:
+    case WGPUTextureFormat_RGBA16Sint:
+    case WGPUTextureFormat_RGBA16Float:
+    case WGPUTextureFormat_RGBA32Float:
+    case WGPUTextureFormat_RGBA32Uint:
+    case WGPUTextureFormat_RGBA32Sint:
+        return true;
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return device.hasFeature(WGPUFeatureName_RG11B10UfloatRenderable);
+    case WGPUTextureFormat_Stencil8:
+    case WGPUTextureFormat_Depth16Unorm:
+    case WGPUTextureFormat_Depth24Plus:
+    case WGPUTextureFormat_Depth24PlusStencil8:
+    case WGPUTextureFormat_Depth32Float:
+    case WGPUTextureFormat_Depth32FloatStencil8:
+        return false;
+    case WGPUTextureFormat_R8Snorm:
+    case WGPUTextureFormat_RG8Snorm:
+    case WGPUTextureFormat_RGBA8Snorm:
+    case WGPUTextureFormat_RGB9E5Ufloat:
+    case WGPUTextureFormat_BC1RGBAUnorm:
+    case WGPUTextureFormat_BC1RGBAUnormSrgb:
+    case WGPUTextureFormat_BC2RGBAUnorm:
+    case WGPUTextureFormat_BC2RGBAUnormSrgb:
+    case WGPUTextureFormat_BC3RGBAUnorm:
+    case WGPUTextureFormat_BC3RGBAUnormSrgb:
+    case WGPUTextureFormat_BC4RUnorm:
+    case WGPUTextureFormat_BC4RSnorm:
+    case WGPUTextureFormat_BC5RGUnorm:
+    case WGPUTextureFormat_BC5RGSnorm:
+    case WGPUTextureFormat_BC6HRGBUfloat:
+    case WGPUTextureFormat_BC6HRGBFloat:
+    case WGPUTextureFormat_BC7RGBAUnorm:
+    case WGPUTextureFormat_BC7RGBAUnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8Unorm:
+    case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8A1Unorm:
+    case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+    case WGPUTextureFormat_ETC2RGBA8Unorm:
+    case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+    case WGPUTextureFormat_EACR11Unorm:
+    case WGPUTextureFormat_EACR11Snorm:
+    case WGPUTextureFormat_EACRG11Unorm:
+    case WGPUTextureFormat_EACRG11Snorm:
+    case WGPUTextureFormat_ASTC4x4Unorm:
+    case WGPUTextureFormat_ASTC4x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x4Unorm:
+    case WGPUTextureFormat_ASTC5x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x5Unorm:
+    case WGPUTextureFormat_ASTC5x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x5Unorm:
+    case WGPUTextureFormat_ASTC6x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x6Unorm:
+    case WGPUTextureFormat_ASTC6x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x5Unorm:
+    case WGPUTextureFormat_ASTC8x5UnormSrgb:
+    case WGPUTextureFormat_ASTC8x6Unorm:
+    case WGPUTextureFormat_ASTC8x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x8Unorm:
+    case WGPUTextureFormat_ASTC8x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x5Unorm:
+    case WGPUTextureFormat_ASTC10x5UnormSrgb:
+    case WGPUTextureFormat_ASTC10x6Unorm:
+    case WGPUTextureFormat_ASTC10x6UnormSrgb:
+    case WGPUTextureFormat_ASTC10x8Unorm:
+    case WGPUTextureFormat_ASTC10x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x10Unorm:
+    case WGPUTextureFormat_ASTC10x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x10Unorm:
+    case WGPUTextureFormat_ASTC12x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x12Unorm:
+    case WGPUTextureFormat_ASTC12x12UnormSrgb:
+        return false;
+    case WGPUTextureFormat_Undefined:
+        return false;
+    case WGPUTextureFormat_Force32:
+        ASSERT_NOT_REACHED();
+        return false;
+    }
+}
+
+bool Texture::isDepthStencilRenderableFormat(WGPUTextureFormat format, const Device&)
+{
+    // https://gpuweb.github.io/gpuweb/#renderable-format
+    switch (format) {
+    case WGPUTextureFormat_R8Unorm:
+    case WGPUTextureFormat_R8Uint:
+    case WGPUTextureFormat_R8Sint:
+    case WGPUTextureFormat_R16Uint:
+    case WGPUTextureFormat_R16Sint:
+    case WGPUTextureFormat_R16Float:
+    case WGPUTextureFormat_RG8Unorm:
+    case WGPUTextureFormat_RG8Uint:
+    case WGPUTextureFormat_RG8Sint:
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
+    case WGPUTextureFormat_RG16Uint:
+    case WGPUTextureFormat_RG16Sint:
+    case WGPUTextureFormat_RG16Float:
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA8UnormSrgb:
+    case WGPUTextureFormat_RGBA8Uint:
+    case WGPUTextureFormat_RGBA8Sint:
+    case WGPUTextureFormat_BGRA8Unorm:
+    case WGPUTextureFormat_BGRA8UnormSrgb:
+    case WGPUTextureFormat_RGB10A2Uint:
+    case WGPUTextureFormat_RGB10A2Unorm:
+    case WGPUTextureFormat_RG32Float:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+    case WGPUTextureFormat_RGBA16Uint:
+    case WGPUTextureFormat_RGBA16Sint:
+    case WGPUTextureFormat_RGBA16Float:
+    case WGPUTextureFormat_RGBA32Float:
+    case WGPUTextureFormat_RGBA32Uint:
+    case WGPUTextureFormat_RGBA32Sint:
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return false;
+    case WGPUTextureFormat_Stencil8:
+    case WGPUTextureFormat_Depth16Unorm:
+    case WGPUTextureFormat_Depth24Plus:
+    case WGPUTextureFormat_Depth24PlusStencil8:
+    case WGPUTextureFormat_Depth32Float:
+    case WGPUTextureFormat_Depth32FloatStencil8:
+        return true;
+    case WGPUTextureFormat_R8Snorm:
+    case WGPUTextureFormat_RG8Snorm:
+    case WGPUTextureFormat_RGBA8Snorm:
+    case WGPUTextureFormat_RGB9E5Ufloat:
+    case WGPUTextureFormat_BC1RGBAUnorm:
+    case WGPUTextureFormat_BC1RGBAUnormSrgb:
+    case WGPUTextureFormat_BC2RGBAUnorm:
+    case WGPUTextureFormat_BC2RGBAUnormSrgb:
+    case WGPUTextureFormat_BC3RGBAUnorm:
+    case WGPUTextureFormat_BC3RGBAUnormSrgb:
+    case WGPUTextureFormat_BC4RUnorm:
+    case WGPUTextureFormat_BC4RSnorm:
+    case WGPUTextureFormat_BC5RGUnorm:
+    case WGPUTextureFormat_BC5RGSnorm:
+    case WGPUTextureFormat_BC6HRGBUfloat:
+    case WGPUTextureFormat_BC6HRGBFloat:
+    case WGPUTextureFormat_BC7RGBAUnorm:
+    case WGPUTextureFormat_BC7RGBAUnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8Unorm:
+    case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8A1Unorm:
+    case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+    case WGPUTextureFormat_ETC2RGBA8Unorm:
+    case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+    case WGPUTextureFormat_EACR11Unorm:
+    case WGPUTextureFormat_EACR11Snorm:
+    case WGPUTextureFormat_EACRG11Unorm:
+    case WGPUTextureFormat_EACRG11Snorm:
+    case WGPUTextureFormat_ASTC4x4Unorm:
+    case WGPUTextureFormat_ASTC4x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x4Unorm:
+    case WGPUTextureFormat_ASTC5x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x5Unorm:
+    case WGPUTextureFormat_ASTC5x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x5Unorm:
+    case WGPUTextureFormat_ASTC6x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x6Unorm:
+    case WGPUTextureFormat_ASTC6x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x5Unorm:
+    case WGPUTextureFormat_ASTC8x5UnormSrgb:
+    case WGPUTextureFormat_ASTC8x6Unorm:
+    case WGPUTextureFormat_ASTC8x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x8Unorm:
+    case WGPUTextureFormat_ASTC8x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x5Unorm:
+    case WGPUTextureFormat_ASTC10x5UnormSrgb:
+    case WGPUTextureFormat_ASTC10x6Unorm:
+    case WGPUTextureFormat_ASTC10x6UnormSrgb:
+    case WGPUTextureFormat_ASTC10x8Unorm:
+    case WGPUTextureFormat_ASTC10x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x10Unorm:
+    case WGPUTextureFormat_ASTC10x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x10Unorm:
+    case WGPUTextureFormat_ASTC12x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x12Unorm:
+    case WGPUTextureFormat_ASTC12x12UnormSrgb:
+        return false;
+    case WGPUTextureFormat_Undefined:
+        return false;
+    case WGPUTextureFormat_Force32:
+        ASSERT_NOT_REACHED();
+        return false;
+    }
+}
+
+bool Texture::isRenderableFormat(WGPUTextureFormat format, const Device& device)
 {
     // https://gpuweb.github.io/gpuweb/#renderable-format
     switch (format) {
@@ -774,8 +1001,9 @@ static bool isRenderableFormat(WGPUTextureFormat format)
     case WGPUTextureFormat_Depth24PlusStencil8:
     case WGPUTextureFormat_Depth32Float:
     case WGPUTextureFormat_Depth32FloatStencil8:
-    case WGPUTextureFormat_RG11B10Ufloat:
         return true;
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return device.hasFeature(WGPUFeatureName_RG11B10UfloatRenderable);
     case WGPUTextureFormat_R8Snorm:
     case WGPUTextureFormat_RG8Snorm:
     case WGPUTextureFormat_RGBA8Snorm:
@@ -834,13 +1062,241 @@ static bool isRenderableFormat(WGPUTextureFormat format)
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return false;
     case WGPUTextureFormat_Undefined:
+        return false;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return false;
     }
 }
 
-static bool supportsMultisampling(WGPUTextureFormat format)
+uint32_t Texture::renderTargetPixelByteCost(WGPUTextureFormat format)
+{
+    // https://gpuweb.github.io/gpuweb/#renderable-format
+    switch (format) {
+    case WGPUTextureFormat_R8Unorm:
+    case WGPUTextureFormat_R8Uint:
+    case WGPUTextureFormat_R8Sint:
+        return 1;
+    case WGPUTextureFormat_R16Uint:
+    case WGPUTextureFormat_R16Sint:
+    case WGPUTextureFormat_R16Float:
+    case WGPUTextureFormat_RG8Unorm:
+    case WGPUTextureFormat_RG8Uint:
+    case WGPUTextureFormat_RG8Sint:
+        return 2;
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
+    case WGPUTextureFormat_RG16Uint:
+    case WGPUTextureFormat_RG16Sint:
+    case WGPUTextureFormat_RG16Float:
+        return 4;
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA8UnormSrgb:
+        return 8;
+    case WGPUTextureFormat_RGBA8Uint:
+    case WGPUTextureFormat_RGBA8Sint:
+        return 4;
+    case WGPUTextureFormat_BGRA8Unorm:
+    case WGPUTextureFormat_BGRA8UnormSrgb:
+    case WGPUTextureFormat_RGB10A2Uint:
+    case WGPUTextureFormat_RGB10A2Unorm:
+    case WGPUTextureFormat_RG32Float:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+    case WGPUTextureFormat_RGBA16Uint:
+    case WGPUTextureFormat_RGBA16Sint:
+    case WGPUTextureFormat_RGBA16Float:
+        return 8;
+    case WGPUTextureFormat_RGBA32Float:
+    case WGPUTextureFormat_RGBA32Uint:
+    case WGPUTextureFormat_RGBA32Sint:
+        return 16;
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return 8;
+    case WGPUTextureFormat_Stencil8:
+    case WGPUTextureFormat_Depth16Unorm:
+    case WGPUTextureFormat_Depth24Plus:
+    case WGPUTextureFormat_Depth24PlusStencil8:
+    case WGPUTextureFormat_Depth32Float:
+    case WGPUTextureFormat_Depth32FloatStencil8:
+    case WGPUTextureFormat_R8Snorm:
+    case WGPUTextureFormat_RG8Snorm:
+    case WGPUTextureFormat_RGBA8Snorm:
+    case WGPUTextureFormat_RGB9E5Ufloat:
+    case WGPUTextureFormat_BC1RGBAUnorm:
+    case WGPUTextureFormat_BC1RGBAUnormSrgb:
+    case WGPUTextureFormat_BC2RGBAUnorm:
+    case WGPUTextureFormat_BC2RGBAUnormSrgb:
+    case WGPUTextureFormat_BC3RGBAUnorm:
+    case WGPUTextureFormat_BC3RGBAUnormSrgb:
+    case WGPUTextureFormat_BC4RUnorm:
+    case WGPUTextureFormat_BC4RSnorm:
+    case WGPUTextureFormat_BC5RGUnorm:
+    case WGPUTextureFormat_BC5RGSnorm:
+    case WGPUTextureFormat_BC6HRGBUfloat:
+    case WGPUTextureFormat_BC6HRGBFloat:
+    case WGPUTextureFormat_BC7RGBAUnorm:
+    case WGPUTextureFormat_BC7RGBAUnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8Unorm:
+    case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8A1Unorm:
+    case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+    case WGPUTextureFormat_ETC2RGBA8Unorm:
+    case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+    case WGPUTextureFormat_EACR11Unorm:
+    case WGPUTextureFormat_EACR11Snorm:
+    case WGPUTextureFormat_EACRG11Unorm:
+    case WGPUTextureFormat_EACRG11Snorm:
+    case WGPUTextureFormat_ASTC4x4Unorm:
+    case WGPUTextureFormat_ASTC4x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x4Unorm:
+    case WGPUTextureFormat_ASTC5x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x5Unorm:
+    case WGPUTextureFormat_ASTC5x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x5Unorm:
+    case WGPUTextureFormat_ASTC6x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x6Unorm:
+    case WGPUTextureFormat_ASTC6x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x5Unorm:
+    case WGPUTextureFormat_ASTC8x5UnormSrgb:
+    case WGPUTextureFormat_ASTC8x6Unorm:
+    case WGPUTextureFormat_ASTC8x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x8Unorm:
+    case WGPUTextureFormat_ASTC8x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x5Unorm:
+    case WGPUTextureFormat_ASTC10x5UnormSrgb:
+    case WGPUTextureFormat_ASTC10x6Unorm:
+    case WGPUTextureFormat_ASTC10x6UnormSrgb:
+    case WGPUTextureFormat_ASTC10x8Unorm:
+    case WGPUTextureFormat_ASTC10x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x10Unorm:
+    case WGPUTextureFormat_ASTC10x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x10Unorm:
+    case WGPUTextureFormat_ASTC12x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x12Unorm:
+    case WGPUTextureFormat_ASTC12x12UnormSrgb:
+        return 0;
+    case WGPUTextureFormat_Undefined:
+        return 0;
+    case WGPUTextureFormat_Force32:
+        ASSERT_NOT_REACHED();
+        return 0;
+    }
+}
+
+uint32_t Texture::renderTargetPixelByteAlignment(WGPUTextureFormat format)
+{
+    // https://gpuweb.github.io/gpuweb/#renderable-format
+    switch (format) {
+    case WGPUTextureFormat_R8Unorm:
+    case WGPUTextureFormat_R8Uint:
+    case WGPUTextureFormat_R8Sint:
+    case WGPUTextureFormat_RG8Unorm:
+    case WGPUTextureFormat_RG8Uint:
+    case WGPUTextureFormat_RG8Sint:
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA8UnormSrgb:
+    case WGPUTextureFormat_RGBA8Uint:
+    case WGPUTextureFormat_RGBA8Sint:
+    case WGPUTextureFormat_BGRA8Unorm:
+    case WGPUTextureFormat_BGRA8UnormSrgb:
+        return 1;
+    case WGPUTextureFormat_R16Uint:
+    case WGPUTextureFormat_R16Sint:
+    case WGPUTextureFormat_R16Float:
+    case WGPUTextureFormat_RG16Uint:
+    case WGPUTextureFormat_RG16Sint:
+    case WGPUTextureFormat_RG16Float:
+    case WGPUTextureFormat_RGBA16Uint:
+    case WGPUTextureFormat_RGBA16Sint:
+    case WGPUTextureFormat_RGBA16Float:
+        return 2;
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
+    case WGPUTextureFormat_RGB10A2Uint:
+    case WGPUTextureFormat_RGB10A2Unorm:
+    case WGPUTextureFormat_RG32Float:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+    case WGPUTextureFormat_RGBA32Float:
+    case WGPUTextureFormat_RGBA32Uint:
+    case WGPUTextureFormat_RGBA32Sint:
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return 4;
+    case WGPUTextureFormat_Stencil8:
+    case WGPUTextureFormat_Depth16Unorm:
+    case WGPUTextureFormat_Depth24Plus:
+    case WGPUTextureFormat_Depth24PlusStencil8:
+    case WGPUTextureFormat_Depth32Float:
+    case WGPUTextureFormat_Depth32FloatStencil8:
+    case WGPUTextureFormat_R8Snorm:
+    case WGPUTextureFormat_RG8Snorm:
+    case WGPUTextureFormat_RGBA8Snorm:
+    case WGPUTextureFormat_RGB9E5Ufloat:
+    case WGPUTextureFormat_BC1RGBAUnorm:
+    case WGPUTextureFormat_BC1RGBAUnormSrgb:
+    case WGPUTextureFormat_BC2RGBAUnorm:
+    case WGPUTextureFormat_BC2RGBAUnormSrgb:
+    case WGPUTextureFormat_BC3RGBAUnorm:
+    case WGPUTextureFormat_BC3RGBAUnormSrgb:
+    case WGPUTextureFormat_BC4RUnorm:
+    case WGPUTextureFormat_BC4RSnorm:
+    case WGPUTextureFormat_BC5RGUnorm:
+    case WGPUTextureFormat_BC5RGSnorm:
+    case WGPUTextureFormat_BC6HRGBUfloat:
+    case WGPUTextureFormat_BC6HRGBFloat:
+    case WGPUTextureFormat_BC7RGBAUnorm:
+    case WGPUTextureFormat_BC7RGBAUnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8Unorm:
+    case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8A1Unorm:
+    case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+    case WGPUTextureFormat_ETC2RGBA8Unorm:
+    case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+    case WGPUTextureFormat_EACR11Unorm:
+    case WGPUTextureFormat_EACR11Snorm:
+    case WGPUTextureFormat_EACRG11Unorm:
+    case WGPUTextureFormat_EACRG11Snorm:
+    case WGPUTextureFormat_ASTC4x4Unorm:
+    case WGPUTextureFormat_ASTC4x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x4Unorm:
+    case WGPUTextureFormat_ASTC5x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x5Unorm:
+    case WGPUTextureFormat_ASTC5x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x5Unorm:
+    case WGPUTextureFormat_ASTC6x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x6Unorm:
+    case WGPUTextureFormat_ASTC6x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x5Unorm:
+    case WGPUTextureFormat_ASTC8x5UnormSrgb:
+    case WGPUTextureFormat_ASTC8x6Unorm:
+    case WGPUTextureFormat_ASTC8x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x8Unorm:
+    case WGPUTextureFormat_ASTC8x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x5Unorm:
+    case WGPUTextureFormat_ASTC10x5UnormSrgb:
+    case WGPUTextureFormat_ASTC10x6Unorm:
+    case WGPUTextureFormat_ASTC10x6UnormSrgb:
+    case WGPUTextureFormat_ASTC10x8Unorm:
+    case WGPUTextureFormat_ASTC10x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x10Unorm:
+    case WGPUTextureFormat_ASTC10x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x10Unorm:
+    case WGPUTextureFormat_ASTC12x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x12Unorm:
+    case WGPUTextureFormat_ASTC12x12UnormSrgb:
+        return 0;
+    case WGPUTextureFormat_Undefined:
+        return 0;
+    case WGPUTextureFormat_Force32:
+        ASSERT_NOT_REACHED();
+        return 0;
+    }
+}
+
+bool Texture::supportsMultisampling(WGPUTextureFormat format, const Device& device)
 {
     switch (format) {
     // https://gpuweb.github.io/gpuweb/#texture-format-caps
@@ -867,7 +1323,7 @@ static bool supportsMultisampling(WGPUTextureFormat format)
     case WGPUTextureFormat_BGRA8Unorm:
     case WGPUTextureFormat_BGRA8UnormSrgb:
     case WGPUTextureFormat_RGB10A2Unorm:
-    case WGPUTextureFormat_RG11B10Ufloat:
+    case WGPUTextureFormat_RGB10A2Uint:
     case WGPUTextureFormat_RGBA16Uint:
     case WGPUTextureFormat_RGBA16Sint:
     case WGPUTextureFormat_RGBA16Float:
@@ -879,6 +1335,8 @@ static bool supportsMultisampling(WGPUTextureFormat format)
     case WGPUTextureFormat_Depth32Float:
     case WGPUTextureFormat_Depth32FloatStencil8:
         return true;
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return device.hasFeature(WGPUFeatureName_RG11B10UfloatRenderable);
     case WGPUTextureFormat_R32Uint:
     case WGPUTextureFormat_R32Sint:
     case WGPUTextureFormat_RG32Float:
@@ -888,7 +1346,6 @@ static bool supportsMultisampling(WGPUTextureFormat format)
     case WGPUTextureFormat_RGBA32Uint:
     case WGPUTextureFormat_RGBA32Sint:
     case WGPUTextureFormat_RGB9E5Ufloat:
-    case WGPUTextureFormat_RGB10A2Uint:
     case WGPUTextureFormat_BC1RGBAUnorm:
     case WGPUTextureFormat_BC1RGBAUnormSrgb:
     case WGPUTextureFormat_BC2RGBAUnorm:
@@ -943,6 +1400,225 @@ static bool supportsMultisampling(WGPUTextureFormat format)
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return false;
     case WGPUTextureFormat_Undefined:
+        return false;
+    case WGPUTextureFormat_Force32:
+        ASSERT_NOT_REACHED();
+        return false;
+    }
+}
+
+bool Texture::supportsResolve(WGPUTextureFormat format, const Device& device)
+{
+    switch (format) {
+    case WGPUTextureFormat_R8Unorm:
+    case WGPUTextureFormat_R16Float:
+    case WGPUTextureFormat_RG8Unorm:
+    case WGPUTextureFormat_RG16Float:
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA8UnormSrgb:
+    case WGPUTextureFormat_BGRA8Unorm:
+    case WGPUTextureFormat_BGRA8UnormSrgb:
+    case WGPUTextureFormat_RGB10A2Unorm:
+    case WGPUTextureFormat_RGBA16Float:
+        return true;
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return device.hasFeature(WGPUFeatureName_RG11B10UfloatRenderable);
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_Stencil8:
+    case WGPUTextureFormat_Depth16Unorm:
+    case WGPUTextureFormat_Depth24Plus:
+    case WGPUTextureFormat_Depth24PlusStencil8:
+    case WGPUTextureFormat_Depth32Float:
+    case WGPUTextureFormat_Depth32FloatStencil8:
+    case WGPUTextureFormat_R8Snorm:
+    case WGPUTextureFormat_R8Uint:
+    case WGPUTextureFormat_R8Sint:
+    case WGPUTextureFormat_R16Uint:
+    case WGPUTextureFormat_R16Sint:
+    case WGPUTextureFormat_RG8Snorm:
+    case WGPUTextureFormat_RG8Uint:
+    case WGPUTextureFormat_RG8Sint:
+    case WGPUTextureFormat_RGBA8Snorm:
+    case WGPUTextureFormat_RG16Uint:
+    case WGPUTextureFormat_RG16Sint:
+    case WGPUTextureFormat_RGBA8Uint:
+    case WGPUTextureFormat_RGBA8Sint:
+    case WGPUTextureFormat_RGB10A2Uint:
+    case WGPUTextureFormat_RGBA16Uint:
+    case WGPUTextureFormat_RGBA16Sint:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
+    case WGPUTextureFormat_RG32Float:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+    case WGPUTextureFormat_RGBA32Float:
+    case WGPUTextureFormat_RGBA32Uint:
+    case WGPUTextureFormat_RGBA32Sint:
+    case WGPUTextureFormat_RGB9E5Ufloat:
+    case WGPUTextureFormat_BC1RGBAUnorm:
+    case WGPUTextureFormat_BC1RGBAUnormSrgb:
+    case WGPUTextureFormat_BC2RGBAUnorm:
+    case WGPUTextureFormat_BC2RGBAUnormSrgb:
+    case WGPUTextureFormat_BC3RGBAUnorm:
+    case WGPUTextureFormat_BC3RGBAUnormSrgb:
+    case WGPUTextureFormat_BC4RUnorm:
+    case WGPUTextureFormat_BC4RSnorm:
+    case WGPUTextureFormat_BC5RGUnorm:
+    case WGPUTextureFormat_BC5RGSnorm:
+    case WGPUTextureFormat_BC6HRGBUfloat:
+    case WGPUTextureFormat_BC6HRGBFloat:
+    case WGPUTextureFormat_BC7RGBAUnorm:
+    case WGPUTextureFormat_BC7RGBAUnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8Unorm:
+    case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8A1Unorm:
+    case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+    case WGPUTextureFormat_ETC2RGBA8Unorm:
+    case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+    case WGPUTextureFormat_EACR11Unorm:
+    case WGPUTextureFormat_EACR11Snorm:
+    case WGPUTextureFormat_EACRG11Unorm:
+    case WGPUTextureFormat_EACRG11Snorm:
+    case WGPUTextureFormat_ASTC4x4Unorm:
+    case WGPUTextureFormat_ASTC4x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x4Unorm:
+    case WGPUTextureFormat_ASTC5x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x5Unorm:
+    case WGPUTextureFormat_ASTC5x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x5Unorm:
+    case WGPUTextureFormat_ASTC6x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x6Unorm:
+    case WGPUTextureFormat_ASTC6x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x5Unorm:
+    case WGPUTextureFormat_ASTC8x5UnormSrgb:
+    case WGPUTextureFormat_ASTC8x6Unorm:
+    case WGPUTextureFormat_ASTC8x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x8Unorm:
+    case WGPUTextureFormat_ASTC8x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x5Unorm:
+    case WGPUTextureFormat_ASTC10x5UnormSrgb:
+    case WGPUTextureFormat_ASTC10x6Unorm:
+    case WGPUTextureFormat_ASTC10x6UnormSrgb:
+    case WGPUTextureFormat_ASTC10x8Unorm:
+    case WGPUTextureFormat_ASTC10x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x10Unorm:
+    case WGPUTextureFormat_ASTC10x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x10Unorm:
+    case WGPUTextureFormat_ASTC12x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x12Unorm:
+    case WGPUTextureFormat_ASTC12x12UnormSrgb:
+        return false;
+    case WGPUTextureFormat_Undefined:
+        return false;
+    case WGPUTextureFormat_Force32:
+        RELEASE_ASSERT_NOT_REACHED();
+    }
+}
+
+bool Texture::supportsBlending(WGPUTextureFormat format, const Device& device)
+{
+    switch (format) {
+    // https://gpuweb.github.io/gpuweb/#texture-format-caps
+    case WGPUTextureFormat_R8Unorm:
+    case WGPUTextureFormat_RG8Unorm:
+    case WGPUTextureFormat_RGBA8Unorm:
+    case WGPUTextureFormat_RGBA8UnormSrgb:
+    case WGPUTextureFormat_BGRA8Unorm:
+    case WGPUTextureFormat_BGRA8UnormSrgb:
+    case WGPUTextureFormat_R16Float:
+    case WGPUTextureFormat_RG16Float:
+    case WGPUTextureFormat_RGBA16Float:
+    case WGPUTextureFormat_RGB10A2Unorm:
+        return true;
+    case WGPUTextureFormat_RG11B10Ufloat:
+        return device.hasFeature(WGPUFeatureName_RG11B10UfloatRenderable);
+    case WGPUTextureFormat_R8Snorm:
+    case WGPUTextureFormat_R8Uint:
+    case WGPUTextureFormat_R8Sint:
+    case WGPUTextureFormat_R16Uint:
+    case WGPUTextureFormat_R16Sint:
+    case WGPUTextureFormat_RG8Snorm:
+    case WGPUTextureFormat_RG8Uint:
+    case WGPUTextureFormat_RG8Sint:
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_RG16Uint:
+    case WGPUTextureFormat_RG16Sint:
+    case WGPUTextureFormat_RGBA8Snorm:
+    case WGPUTextureFormat_RGBA8Uint:
+    case WGPUTextureFormat_RGBA8Sint:
+    case WGPUTextureFormat_RGB10A2Uint:
+    case WGPUTextureFormat_RGBA16Uint:
+    case WGPUTextureFormat_RGBA16Sint:
+    case WGPUTextureFormat_Stencil8:
+    case WGPUTextureFormat_Depth16Unorm:
+    case WGPUTextureFormat_Depth24Plus:
+    case WGPUTextureFormat_Depth24PlusStencil8:
+    case WGPUTextureFormat_Depth32Float:
+    case WGPUTextureFormat_Depth32FloatStencil8:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
+    case WGPUTextureFormat_RG32Float:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+    case WGPUTextureFormat_RGBA32Float:
+    case WGPUTextureFormat_RGBA32Uint:
+    case WGPUTextureFormat_RGBA32Sint:
+    case WGPUTextureFormat_RGB9E5Ufloat:
+    case WGPUTextureFormat_BC1RGBAUnorm:
+    case WGPUTextureFormat_BC1RGBAUnormSrgb:
+    case WGPUTextureFormat_BC2RGBAUnorm:
+    case WGPUTextureFormat_BC2RGBAUnormSrgb:
+    case WGPUTextureFormat_BC3RGBAUnorm:
+    case WGPUTextureFormat_BC3RGBAUnormSrgb:
+    case WGPUTextureFormat_BC4RUnorm:
+    case WGPUTextureFormat_BC4RSnorm:
+    case WGPUTextureFormat_BC5RGUnorm:
+    case WGPUTextureFormat_BC5RGSnorm:
+    case WGPUTextureFormat_BC6HRGBUfloat:
+    case WGPUTextureFormat_BC6HRGBFloat:
+    case WGPUTextureFormat_BC7RGBAUnorm:
+    case WGPUTextureFormat_BC7RGBAUnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8Unorm:
+    case WGPUTextureFormat_ETC2RGB8UnormSrgb:
+    case WGPUTextureFormat_ETC2RGB8A1Unorm:
+    case WGPUTextureFormat_ETC2RGB8A1UnormSrgb:
+    case WGPUTextureFormat_ETC2RGBA8Unorm:
+    case WGPUTextureFormat_ETC2RGBA8UnormSrgb:
+    case WGPUTextureFormat_EACR11Unorm:
+    case WGPUTextureFormat_EACR11Snorm:
+    case WGPUTextureFormat_EACRG11Unorm:
+    case WGPUTextureFormat_EACRG11Snorm:
+    case WGPUTextureFormat_ASTC4x4Unorm:
+    case WGPUTextureFormat_ASTC4x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x4Unorm:
+    case WGPUTextureFormat_ASTC5x4UnormSrgb:
+    case WGPUTextureFormat_ASTC5x5Unorm:
+    case WGPUTextureFormat_ASTC5x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x5Unorm:
+    case WGPUTextureFormat_ASTC6x5UnormSrgb:
+    case WGPUTextureFormat_ASTC6x6Unorm:
+    case WGPUTextureFormat_ASTC6x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x5Unorm:
+    case WGPUTextureFormat_ASTC8x5UnormSrgb:
+    case WGPUTextureFormat_ASTC8x6Unorm:
+    case WGPUTextureFormat_ASTC8x6UnormSrgb:
+    case WGPUTextureFormat_ASTC8x8Unorm:
+    case WGPUTextureFormat_ASTC8x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x5Unorm:
+    case WGPUTextureFormat_ASTC10x5UnormSrgb:
+    case WGPUTextureFormat_ASTC10x6Unorm:
+    case WGPUTextureFormat_ASTC10x6UnormSrgb:
+    case WGPUTextureFormat_ASTC10x8Unorm:
+    case WGPUTextureFormat_ASTC10x8UnormSrgb:
+    case WGPUTextureFormat_ASTC10x10Unorm:
+    case WGPUTextureFormat_ASTC10x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x10Unorm:
+    case WGPUTextureFormat_ASTC12x10UnormSrgb:
+    case WGPUTextureFormat_ASTC12x12Unorm:
+    case WGPUTextureFormat_ASTC12x12UnormSrgb:
+        return false;
+    case WGPUTextureFormat_Undefined:
+        return false;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return false;
@@ -975,7 +1651,7 @@ static uint32_t maximumMiplevelCount(WGPUTextureDimension dimension, WGPUExtent3
     return WTF::fastLog2(m);
 }
 
-static bool hasStorageBindingCapability(WGPUTextureFormat format)
+bool Texture::hasStorageBindingCapability(WGPUTextureFormat format, const Device& device, WGPUStorageTextureAccess access)
 {
     // https://gpuweb.github.io/gpuweb/#plain-color-formats
     switch (format) {
@@ -986,16 +1662,20 @@ static bool hasStorageBindingCapability(WGPUTextureFormat format)
     case WGPUTextureFormat_RGBA16Uint:
     case WGPUTextureFormat_RGBA16Sint:
     case WGPUTextureFormat_RGBA16Float:
-    case WGPUTextureFormat_R32Float:
-    case WGPUTextureFormat_R32Uint:
-    case WGPUTextureFormat_R32Sint:
     case WGPUTextureFormat_RG32Float:
-    case WGPUTextureFormat_RG32Uint:
-    case WGPUTextureFormat_RG32Sint:
     case WGPUTextureFormat_RGBA32Float:
     case WGPUTextureFormat_RGBA32Uint:
     case WGPUTextureFormat_RGBA32Sint:
+    case WGPUTextureFormat_RG32Uint:
+    case WGPUTextureFormat_RG32Sint:
+        return access != WGPUStorageTextureAccess_ReadWrite;
+    case WGPUTextureFormat_BGRA8Unorm:
+        return access != WGPUStorageTextureAccess_ReadWrite && device.hasFeature(WGPUFeatureName_BGRA8UnormStorage);
+    case WGPUTextureFormat_R32Float:
+    case WGPUTextureFormat_R32Uint:
+    case WGPUTextureFormat_R32Sint:
         return true;
+    case WGPUTextureFormat_RGBA8UnormSrgb:
     case WGPUTextureFormat_R8Unorm:
     case WGPUTextureFormat_R8Snorm:
     case WGPUTextureFormat_R8Uint:
@@ -1010,8 +1690,6 @@ static bool hasStorageBindingCapability(WGPUTextureFormat format)
     case WGPUTextureFormat_RG16Uint:
     case WGPUTextureFormat_RG16Sint:
     case WGPUTextureFormat_RG16Float:
-    case WGPUTextureFormat_RGBA8UnormSrgb:
-    case WGPUTextureFormat_BGRA8Unorm:
     case WGPUTextureFormat_BGRA8UnormSrgb:
     case WGPUTextureFormat_RGB10A2Unorm:
     case WGPUTextureFormat_RG11B10Ufloat:
@@ -1077,6 +1755,7 @@ static bool hasStorageBindingCapability(WGPUTextureFormat format)
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return false;
     case WGPUTextureFormat_Undefined:
+        return false;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return false;
@@ -1210,6 +1889,7 @@ WGPUTextureFormat Texture::removeSRGBSuffix(WGPUTextureFormat format)
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return WGPUTextureFormat_ASTC12x12Unorm;
     case WGPUTextureFormat_Undefined:
+        return WGPUTextureFormat_Undefined;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return WGPUTextureFormat_Undefined;
@@ -1226,116 +1906,116 @@ static bool textureViewFormatCompatible(WGPUTextureFormat format1, WGPUTextureFo
     return Texture::removeSRGBSuffix(format1) == Texture::removeSRGBSuffix(format2);
 }
 
-bool Device::validateCreateTexture(const WGPUTextureDescriptor& descriptor, const Vector<WGPUTextureFormat>& viewFormats)
+NSString *Device::errorValidatingTextureCreation(const WGPUTextureDescriptor& descriptor, const Vector<WGPUTextureFormat>& viewFormats)
 {
     if (!isValid())
-        return false;
+        return @"createTexture: Device is not valid";
 
     if (!descriptor.usage)
-        return false;
+        return @"createTexture: descriptor.usage is zero";
 
     if (!descriptor.size.width || !descriptor.size.height || !descriptor.size.depthOrArrayLayers)
-        return false;
+        return @"createTexture: descriptor.size.width/height/depth is zero";
 
     if (!descriptor.mipLevelCount)
-        return false;
+        return @"createTexture: descriptor.mipLevelCount is zero";
 
     if (descriptor.sampleCount != 1 && descriptor.sampleCount != 4)
-        return false;
+        return @"createTexture: descriptor.sampleCount is neither 1 nor 4";
 
     switch (descriptor.dimension) {
     case WGPUTextureDimension_1D:
         if (descriptor.size.width > limits().maxTextureDimension1D)
-            return false;
+            return @"createTexture: descriptor.size.width is greater than limits().maxTextureDimension1D";
 
         if (descriptor.size.height != 1)
-            return false;
+            return @"createTexture: descriptor.size.height != 1";
 
         if (descriptor.size.depthOrArrayLayers != 1)
-            return false;
+            return @"createTexture: descriptor.size.depthOrArrayLayers != 1";
 
         if (descriptor.sampleCount != 1)
-            return false;
+            return @"createTexture: descriptor.sampleCount != 1";
 
         if (Texture::isCompressedFormat(descriptor.format) || Texture::isDepthOrStencilFormat(descriptor.format))
-            return false;
+            return @"createTexture: descriptor.format is compressed or a depth stencil format";
         break;
     case WGPUTextureDimension_2D:
         if (descriptor.size.width > limits().maxTextureDimension2D)
-            return false;
+            return @"createTexture: descriptor.size.width is greater than limits().maxTextureDimension2D";
 
         if (descriptor.size.height > limits().maxTextureDimension2D)
-            return false;
+            return @"createTexture: descriptor.size.height is greater than limits().maxTextureDimension2D";
 
         if (descriptor.size.depthOrArrayLayers > limits().maxTextureArrayLayers)
-            return false;
+            return @"createTexture: descriptor.size.depthOrArrayLayers > limits().maxTextureArrayLayers";
         break;
     case WGPUTextureDimension_3D:
         if (descriptor.size.width > limits().maxTextureDimension3D)
-            return false;
+            return @"createTexture: descriptor.size.width > limits().maxTextureDimension3D";
 
         if (descriptor.size.height > limits().maxTextureDimension3D)
-            return false;
+            return @"createTexture: descriptor.size.height > limits().maxTextureDimension3D";
 
         if (descriptor.size.depthOrArrayLayers > limits().maxTextureDimension3D)
-            return false;
+            return @"createTexture: descriptor.size.depthOrArrayLayers > limits().maxTextureDimension3D";
 
         if (descriptor.sampleCount != 1)
-            return false;
+            return @"createTexture: descriptor.sampleCount != 1";
 
         if (Texture::isCompressedFormat(descriptor.format) || Texture::isDepthOrStencilFormat(descriptor.format))
-            return false;
+            return @"createTexture: descriptor.format is compressed or a depth stencil format";
         break;
     case WGPUTextureDimension_Force32:
         ASSERT_NOT_REACHED();
-        return false;
+        return @"createTexture: descriptor.dimension is WGPUTextureDimension_Force32";
     }
 
     if (descriptor.size.width % Texture::texelBlockWidth(descriptor.format))
-        return false;
+        return @"createTexture: descriptor.size.width % Texture::texelBlockWidth(descriptor.format)";
 
     if (descriptor.size.height % Texture::texelBlockHeight(descriptor.format))
-        return false;
+        return @"createTexture: descriptor.size.height % Texture::texelBlockHeight(descriptor.format)";
 
     if (descriptor.sampleCount > 1) {
         if (descriptor.mipLevelCount != 1)
-            return false;
+            return @"createTexture: descriptor.sampleCount > 1 and descriptor.mipLevelCount != 1";
 
         if (descriptor.size.depthOrArrayLayers != 1)
-            return false;
+            return @"createTexture: descriptor.sampleCount > 1 and descriptor.size.depthOrArrayLayers != 1";
 
         if ((descriptor.usage & WGPUTextureUsage_StorageBinding) || !(descriptor.usage & WGPUTextureUsage_RenderAttachment))
-            return false;
+            return @"createTexture: descriptor.sampleCount > 1 and (descriptor.usage & WGPUTextureUsage_StorageBinding) || !(descriptor.usage & WGPUTextureUsage_RenderAttachment)";
 
-        if (!isRenderableFormat(descriptor.format))
-            return false;
+        if (!Texture::isRenderableFormat(descriptor.format, *this))
+            return @"createTexture: descriptor.sampleCount > 1 and !isRenderableFormat(descriptor.format, *this)";
 
-        if (!supportsMultisampling(descriptor.format))
-            return false;
+        if (!Texture::supportsMultisampling(descriptor.format, *this))
+            return @"createTexture: descriptor.sampleCount > 1 and !supportsMultisampling(descriptor.format, *this)";
     }
 
     if (descriptor.mipLevelCount > maximumMiplevelCount(descriptor.dimension, descriptor.size))
-        return false;
+        return @"createTexture: descriptor.mipLevelCount > maximumMiplevelCount(descriptor.dimension, descriptor.size)";
 
     if (descriptor.usage & WGPUTextureUsage_RenderAttachment) {
-        if (!isRenderableFormat(descriptor.format))
-            return false;
+        if (!Texture::isRenderableFormat(descriptor.format, *this))
+            return @"createTexture: descriptor.usage & WGPUTextureUsage_RenderAttachment && !isRenderableFormat(descriptor.format, *this)";
 
-        if (descriptor.dimension != WGPUTextureDimension_2D)
-            return false;
+        if (descriptor.dimension == WGPUTextureDimension_1D)
+            return @"createTexture: descriptor.usage & WGPUTextureUsage_RenderAttachment && descriptor.dimension == WGPUTextureDimension_1D";
     }
 
     if (descriptor.usage & WGPUTextureUsage_StorageBinding) {
-        if (!hasStorageBindingCapability(descriptor.format))
-            return false;
+        if (!Texture::hasStorageBindingCapability(descriptor.format, *this))
+            return @"createTexture: descriptor.usage & WGPUTextureUsage_StorageBinding && !hasStorageBindingCapability(descriptor.format)";
     }
 
     for (auto viewFormat : viewFormats) {
         if (!textureViewFormatCompatible(descriptor.format, viewFormat))
-            return false;
+            return @"createTexture: !textureViewFormatCompatible(descriptor.format, viewFormat)";
     }
 
-    return true;
+    return nil;
 }
 
 MTLTextureUsage Texture::usage(WGPUTextureUsageFlags usage, WGPUTextureFormat format)
@@ -1347,7 +2027,7 @@ MTLTextureUsage Texture::usage(WGPUTextureUsageFlags usage, WGPUTextureFormat fo
         result |= MTLTextureUsageShaderWrite;
     if (usage & WGPUTextureUsage_RenderAttachment)
         result |= MTLTextureUsageRenderTarget;
-    if (Texture::isDepthOrStencilFormat(format))
+    if (Texture::isDepthOrStencilFormat(format) || Texture::isCompressedFormat(format))
         result |= MTLTextureUsagePixelFormatView;
     return result;
 }
@@ -1564,6 +2244,7 @@ MTLPixelFormat Texture::pixelFormat(WGPUTextureFormat textureFormat)
         return MTLPixelFormatInvalid;
 #endif
     case WGPUTextureFormat_Undefined:
+        return MTLPixelFormatInvalid;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return MTLPixelFormatInvalid;
@@ -1697,6 +2378,7 @@ uint32_t Texture::texelBlockSize(WGPUTextureFormat format) // Bytes
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return 16;
     case WGPUTextureFormat_Undefined:
+        return 0;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return 0;
@@ -1832,6 +2514,7 @@ std::optional<MTLPixelFormat> Texture::depthOnlyAspectMetalFormat(WGPUTextureFor
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return std::nullopt;
     case WGPUTextureFormat_Undefined:
+        return std::nullopt;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return std::nullopt;
@@ -1945,6 +2628,7 @@ std::optional<MTLPixelFormat> Texture::stencilOnlyAspectMetalFormat(WGPUTextureF
     case WGPUTextureFormat_ASTC12x12UnormSrgb:
         return std::nullopt;
     case WGPUTextureFormat_Undefined:
+        return std::nullopt;
     case WGPUTextureFormat_Force32:
         ASSERT_NOT_REACHED();
         return std::nullopt;
@@ -1984,8 +2668,8 @@ Ref<Texture> Device::createTexture(const WGPUTextureDescriptor& descriptor)
 
     Vector viewFormats = { descriptor.viewFormats, descriptor.viewFormatCount };
 
-    if (!validateCreateTexture(descriptor, viewFormats)) {
-        generateAValidationError("Validation failure."_s);
+    if (NSString *error = errorValidatingTextureCreation(descriptor, viewFormats)) {
+        generateAValidationError(error);
         return Texture::createInvalid(*this);
     }
 
@@ -2188,92 +2872,93 @@ uint32_t Texture::arrayLayerCount() const
     }
 }
 
-bool Texture::validateCreateView(const WGPUTextureViewDescriptor& descriptor) const
+NSString* Texture::errorValidatingTextureViewCreation(const WGPUTextureViewDescriptor& descriptor) const
 {
+#define ERROR_STRING(x) (@"GPUTexture.createView: " x)
     if (!isValid())
-        return false;
+        return ERROR_STRING(@"texture is not valid");
 
     if (descriptor.aspect == WGPUTextureAspect_All) {
         if (descriptor.format != m_format && !m_viewFormats.contains(descriptor.format))
-            return false;
+            return ERROR_STRING(@"aspect == all and (format != parentTexture's format and !viewFormats.contains(parentTexture's format))");
     } else {
         if (descriptor.format != resolveTextureFormat(m_format, descriptor.aspect))
-            return false;
+            return ERROR_STRING(@"aspect == All and (format != resolveTextureFormat(format, aspect))");
     }
 
     if (!descriptor.mipLevelCount)
-        return false;
+        return ERROR_STRING(@"!mipLevelCount");
 
     auto endMipLevel = checkedSum<uint32_t>(descriptor.baseMipLevel, descriptor.mipLevelCount);
     if (endMipLevel.hasOverflowed() || endMipLevel.value() > m_mipLevelCount)
-        return false;
+        return ERROR_STRING(@"endMipLevel is not valid");
 
     if (!descriptor.arrayLayerCount)
-        return false;
+        return ERROR_STRING(@"!arrayLayerCount");
 
     auto endArrayLayer = checkedSum<uint32_t>(descriptor.baseArrayLayer, descriptor.arrayLayerCount);
     if (endArrayLayer.hasOverflowed() || endArrayLayer.value() > arrayLayerCount())
-        return false;
+        return ERROR_STRING(@"endArrayLayer is not valid");
 
     if (m_sampleCount > 1) {
         if (descriptor.dimension != WGPUTextureViewDimension_2D)
-            return false;
+            return ERROR_STRING(@"sampleCount > 1 and dimension != 2D");
     }
 
     switch (descriptor.dimension) {
     case WGPUTextureViewDimension_Undefined:
-        return false;
+        return ERROR_STRING(@"dimension is undefined");
     case WGPUTextureViewDimension_1D:
         if (m_dimension != WGPUTextureDimension_1D)
-            return false;
+            return ERROR_STRING(@"attempting to create 1D texture view from non-1D base texture");
 
         if (descriptor.arrayLayerCount != 1)
-            return false;
+            return ERROR_STRING(@"attempting to create 1D texture view with array layers");
         break;
     case WGPUTextureViewDimension_2D:
         if (m_dimension != WGPUTextureDimension_2D)
-            return false;
+            return ERROR_STRING(@"attempting to create 2D texture view from non-2D base texture");
 
         if (descriptor.arrayLayerCount != 1)
-            return false;
+            return ERROR_STRING(@"attempting to create 2D texture view with array layers");
         break;
     case WGPUTextureViewDimension_2DArray:
         if (m_dimension != WGPUTextureDimension_2D)
-            return false;
+            return ERROR_STRING(@"attempting to create 2D texture array view from non-2D parent texture");
         break;
     case WGPUTextureViewDimension_Cube:
         if (m_dimension != WGPUTextureDimension_2D)
-            return false;
+            return ERROR_STRING(@"attempting to create cube texture view from non-2D parent texture");
 
         if (descriptor.arrayLayerCount != 6)
-            return false;
+            return ERROR_STRING(@"attempting to create cube texture view with arrayLayerCount != 6");
 
         if (m_width != m_height)
-            return false;
+            return ERROR_STRING(@"attempting to create cube texture view from non-square parent texture");
         break;
     case WGPUTextureViewDimension_CubeArray:
         if (m_dimension != WGPUTextureDimension_2D)
-            return false;
+            return ERROR_STRING(@"attempting to create cube array texture view from non-2D parent texture");
 
         if (descriptor.arrayLayerCount % 6)
-            return false;
+            return ERROR_STRING(@"attempting to create cube array texture view with (arrayLayerCount % 6) != 0");
 
         if (m_width != m_height)
-            return false;
+            return ERROR_STRING(@"attempting to create cube array texture view from non-square parent texture");
         break;
     case WGPUTextureViewDimension_3D:
         if (m_dimension != WGPUTextureDimension_3D)
-            return false;
+            return ERROR_STRING(@"attempting to create 3D texture view from non-3D parent texture");
 
         if (descriptor.arrayLayerCount != 1)
-            return false;
+            return ERROR_STRING(@"attempting to create 3D texture view with array layers");
         break;
     case WGPUTextureViewDimension_Force32:
         ASSERT_NOT_REACHED();
-        return false;
+        return ERROR_STRING(@"descriptor.dimension is invalid value");
     }
-
-    return true;
+#undef ERROR_STRING
+    return nil;
 }
 
 static WGPUExtent3D computeRenderExtent(const WGPUExtent3D& baseSize, uint32_t mipLevel)
@@ -2305,16 +2990,20 @@ static MTLPixelFormat resolvedPixelFormat(MTLPixelFormat viewPixelFormat, MTLPix
 
 Ref<TextureView> Texture::createView(const WGPUTextureViewDescriptor& inputDescriptor)
 {
-    if (inputDescriptor.nextInChain)
-        return TextureView::createInvalid(m_device);
+    if (inputDescriptor.nextInChain || m_destroyed)
+        return TextureView::createInvalid(*this, m_device);
 
     // https://gpuweb.github.io/gpuweb/#dom-gputexture-createview
 
     auto descriptor = resolveTextureViewDescriptorDefaults(inputDescriptor);
+    if (!descriptor) {
+        m_device->generateAValidationError("Validation failure in GPUTexture.createView: descriptor could not be resolved"_s);
+        return TextureView::createInvalid(*this, m_device);
+    }
 
-    if (!descriptor || !validateCreateView(*descriptor)) {
-        m_device->generateAValidationError("Validation failure."_s);
-        return TextureView::createInvalid(m_device);
+    if (NSString *error = errorValidatingTextureViewCreation(*descriptor)) {
+        m_device->generateAValidationError(error);
+        return TextureView::createInvalid(*this, m_device);
     }
 
     auto pixelFormat = Texture::pixelFormat(descriptor->format);
@@ -2324,7 +3013,7 @@ Ref<TextureView> Texture::createView(const WGPUTextureViewDescriptor& inputDescr
     switch (descriptor->dimension) {
     case WGPUTextureViewDimension_Undefined:
         ASSERT_NOT_REACHED();
-        return TextureView::createInvalid(m_device);
+        return TextureView::createInvalid(*this, m_device);
     case WGPUTextureViewDimension_1D:
         if (descriptor->arrayLayerCount == 1)
             textureType = MTLTextureType1D;
@@ -2340,7 +3029,7 @@ Ref<TextureView> Texture::createView(const WGPUTextureViewDescriptor& inputDescr
     case WGPUTextureViewDimension_2DArray:
         if (m_sampleCount > 1) {
 #if PLATFORM(WATCHOS) || PLATFORM(APPLETV)
-            return TextureView::createInvalid(m_device);
+            return TextureView::createInvalid(*this, m_device);
 #else
             textureType = MTLTextureType2DMultisampleArray;
 #endif
@@ -2358,7 +3047,7 @@ Ref<TextureView> Texture::createView(const WGPUTextureViewDescriptor& inputDescr
         break;
     case WGPUTextureViewDimension_Force32:
         ASSERT_NOT_REACHED();
-        return TextureView::createInvalid(m_device);
+        return TextureView::createInvalid(*this, m_device);
     }
 
     auto levels = NSMakeRange(descriptor->baseMipLevel, descriptor->mipLevelCount);
@@ -2367,7 +3056,7 @@ Ref<TextureView> Texture::createView(const WGPUTextureViewDescriptor& inputDescr
 
     id<MTLTexture> texture = [m_texture newTextureViewWithPixelFormat:resolvedPixelFormat(pixelFormat, m_texture.pixelFormat) textureType:textureType levels:levels slices:slices];
     if (!texture)
-        return TextureView::createInvalid(m_device);
+        return TextureView::createInvalid(*this, m_device);
 
     texture.label = fromAPI(descriptor->label);
     if (!texture.label.length)
@@ -2377,14 +3066,34 @@ Ref<TextureView> Texture::createView(const WGPUTextureViewDescriptor& inputDescr
     if (m_usage & WGPUTextureUsage_RenderAttachment)
         renderExtent = computeRenderExtent({ m_width, m_height, m_depthOrArrayLayers }, descriptor->baseMipLevel);
 
-    return TextureView::create(texture, *descriptor, renderExtent, m_device);
+    auto result = TextureView::create(texture, *descriptor, renderExtent, *this, m_device);
+    m_textureViews.append(result);
+    return result;
+}
+
+void Texture::recreateIfNeeded()
+{
+    RELEASE_ASSERT(m_texture.iosurface && m_canvasBacking);
+    m_destroyed = false;
+}
+
+void Texture::makeCanvasBacking()
+{
+    m_canvasBacking = true;
 }
 
 void Texture::destroy()
 {
     // https://gpuweb.github.io/gpuweb/#dom-gputexture-destroy
+    if (!m_canvasBacking)
+        m_texture = nil;
+    m_destroyed = true;
+    for (auto& view : m_textureViews) {
+        if (view.get())
+            view->destroy();
+    }
 
-    m_texture = nil;
+    m_textureViews.clear();
 }
 
 void Texture::setLabel(String&& label)
@@ -2827,6 +3536,31 @@ bool Texture::validateLinearTextureData(const WGPUTextureDataLayout& layout, uin
         return false;
 
     return true;
+}
+
+bool Texture::previouslyCleared(uint32_t mipLevel, uint32_t slice) const
+{
+    if (auto it = m_clearedToZero.find(mipLevel); it != m_clearedToZero.end())
+        return it->value.contains(slice);
+
+    return false;
+}
+
+void Texture::setPreviouslyCleared(uint32_t mipLevel, uint32_t slice)
+{
+    if (auto it = m_clearedToZero.find(mipLevel); it != m_clearedToZero.end()) {
+        it->value.add(slice);
+        return;
+    }
+
+    ClearedToZeroInnerContainer set;
+    set.add(slice);
+    m_clearedToZero.add(mipLevel, set);
+}
+
+bool Texture::isDestroyed() const
+{
+    return m_destroyed;
 }
 
 } // namespace WebGPU

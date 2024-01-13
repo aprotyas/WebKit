@@ -65,6 +65,11 @@ static NSURL *URLFromString(const WTF::String& urlString)
     return URLFromString(_hitTestResult->absoluteLinkURL());
 }
 
+- (NSString *)linkLocalDataMIMEType
+{
+    return _hitTestResult->linkLocalDataMIMEType();
+}
+
 - (NSURL *)absoluteMediaURL
 {
     return URLFromString(_hitTestResult->absoluteMediaURL());
@@ -85,6 +90,16 @@ static NSURL *URLFromString(const WTF::String& urlString)
     return _hitTestResult->lookupText();
 }
 
+- (NSString *)linkSuggestedFilename
+{
+    return _hitTestResult->linkSuggestedFilename();
+}
+
+- (NSString *)imageMIMEType
+{
+    return _hitTestResult->sourceImageMIMEType();
+}
+
 - (BOOL)isContentEditable
 {
     return _hitTestResult->isContentEditable();
@@ -93,6 +108,16 @@ static NSURL *URLFromString(const WTF::String& urlString)
 - (BOOL)isSelected
 {
     return _hitTestResult->isSelected();
+}
+
+- (BOOL)isMediaDownloadable
+{
+    return _hitTestResult->isDownloadableMedia();
+}
+
+- (BOOL)isMediaFullscreen
+{
+    return _hitTestResult->mediaIsInFullscreen();
 }
 
 - (CGRect)elementBoundingBox
@@ -118,7 +143,7 @@ static NSURL *URLFromString(const WTF::String& urlString)
 - (WKFrameInfo *)frameInfo
 {
     if (auto frameInfo = _hitTestResult->frameInfo())
-        return wrapper(API::FrameInfo::create(WTFMove(*frameInfo), &_hitTestResult->page())).autorelease();
+        return wrapper(API::FrameInfo::create(WTFMove(*frameInfo), _hitTestResult->page())).autorelease();
     return nil;
 }
 

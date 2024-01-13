@@ -40,6 +40,16 @@
 
 namespace WebKit {
 
+WebExtensionCallbackHandler::WebExtensionCallbackHandler(JSValue *callbackFunction)
+    : m_callbackFunction(JSValueToObject(callbackFunction.context.JSGlobalContextRef, callbackFunction.JSValueRef, nullptr))
+    , m_globalContext(callbackFunction.context.JSGlobalContextRef)
+{
+    ASSERT(callbackFunction);
+    ASSERT(callbackFunction._isFunction);
+
+    JSValueProtect(m_globalContext.get(), m_callbackFunction);
+}
+
 WebExtensionCallbackHandler::WebExtensionCallbackHandler(JSContextRef context, JSObjectRef callbackFunction, WebExtensionAPIRuntimeBase& runtime)
     : m_callbackFunction(callbackFunction)
     , m_globalContext(JSContextGetGlobalContext(context))
@@ -147,7 +157,7 @@ id WebExtensionCallbackHandler::call(id argumentOne, id argumentTwo, id argument
     });
 }
 
-id toNSObject(JSContextRef context, JSValueRef valueRef, Class requiredClass)
+id toNSObject(JSContextRef context, JSValueRef valueRef, Class containingObjectsOfClass)
 {
     ASSERT(context);
 
@@ -156,22 +166,32 @@ id toNSObject(JSContextRef context, JSValueRef valueRef, Class requiredClass)
 
     JSValue *value = [JSValue valueWithJSValueRef:valueRef inContext:[JSContext contextWithJSGlobalContextRef:JSContextGetGlobalContext(context)]];
 
-    // Return the JSValue instead of calling toObject for some objects,
-    // since that would convert it to an empty NSDictionary and be useless.
-    if (value.isObject && !value._isDictionary && !value.isArray && !value.isDate && !value.isNull)
+    if (value.isArray) {
+        NSUInteger length = [value[@"length"] toUInt32];
+        NSMutableArray *mutableArray = [NSMutableArray arrayWithCapacity:length];
+
+        for (NSUInteger i = 0; i < length; ++i) {
+            JSValue *itemValue = [value valueAtIndex:i];
+            if (id convertedItem = toNSObject(context, itemValue.JSValueRef))
+                [mutableArray addObject:convertedItem];
+        }
+
+        NSArray *resultArray = [mutableArray copy];
+        if (!containingObjectsOfClass || containingObjectsOfClass == NSObject.class)
+            return resultArray;
+
+        return filterObjects(resultArray, ^bool(id, id value) {
+            return [value isKindOfClass:containingObjectsOfClass];
+        });
+    }
+
+    if (value._isDictionary)
+        return toNSDictionary(context, valueRef);
+
+    if (value.isObject && !value.isDate && !value.isNull)
         return value;
 
-    id result = [value toObject];
-    NSArray *resultArray = dynamic_objc_cast<NSArray>(result);
-    if (!requiredClass || !resultArray)
-        return result;
-
-    if (requiredClass == NSObject.class)
-        return resultArray;
-
-    return filterObjects(resultArray, ^bool (id, id value) {
-        return [value isKindOfClass:requiredClass];
-    });
+    return [value toObject];
 }
 
 NSString *toNSString(JSContextRef context, JSValueRef value, NullStringPolicy nullStringPolicy)

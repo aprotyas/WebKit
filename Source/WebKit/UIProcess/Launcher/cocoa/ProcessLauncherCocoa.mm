@@ -139,6 +139,13 @@ static const char* serviceName(const ProcessLauncher::LaunchOptions& launchOptio
     }
 }
 
+void ProcessLauncher::platformDestroy()
+{
+#if USE(EXTENSIONKIT)
+    [m_process invalidate];
+#endif
+}
+
 void ProcessLauncher::launchProcess()
 {
     ASSERT(!m_xpcConnection);
@@ -146,8 +153,10 @@ void ProcessLauncher::launchProcess()
 #if USE(EXTENSIONKIT)
     auto handler = [](ThreadSafeWeakPtr<ProcessLauncher> weakProcessLauncher, _SEExtensionProcess* process, ASCIILiteral name, NSError* error)
     {
-        if (!weakProcessLauncher.get())
+        if (!weakProcessLauncher.get()) {
+            [process invalidate];
             return;
+        }
         if (error) {
             NSLog(@"Error launching process %@ error %@", process, error);
             callOnMainRunLoop([weakProcessLauncher = weakProcessLauncher] {
@@ -158,14 +167,26 @@ void ProcessLauncher::launchProcess()
                 launcher->m_xpcConnection = adoptOSObject(xpc_connection_create(name, nullptr));
                 launcher->finishLaunchingProcess(name);
             });
+            [process invalidate];
             return;
         }
         callOnMainRunLoop([weakProcessLauncher = weakProcessLauncher, name = name, process = RetainPtr<_SEExtensionProcess>(process)] {
-            auto connection = [process makeLibXPCConnectionError:nil];
             auto launcher = weakProcessLauncher.get();
-            if (!launcher)
+            if (!launcher) {
+                [process invalidate];
                 return;
-            launcher->m_xpcConnection = connection;
+            }
+
+            NSError *error = nil;
+            OSObjectPtr xpcConnection = [process makeLibXPCConnectionError:&error];
+            if (!xpcConnection) {
+                RELEASE_LOG_ERROR(Process, "Failed to make libxpc connection for process %{public}@ with error: %{public}@", process.get(), error);
+                [process invalidate];
+                launcher->didFinishLaunchingProcess(0, { });
+                return;
+            }
+
+            launcher->m_xpcConnection = WTFMove(xpcConnection);
             launcher->m_process = WTFMove(process);
             launcher->finishLaunchingProcess(name.characters());
         });
@@ -418,6 +439,10 @@ void ProcessLauncher::terminateProcess()
 
 void ProcessLauncher::platformInvalidate()
 {
+#if USE(EXTENSIONKIT)
+    [m_process invalidate];
+#endif
+
     terminateXPCConnection();
 }
 

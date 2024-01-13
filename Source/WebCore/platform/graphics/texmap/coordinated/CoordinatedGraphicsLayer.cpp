@@ -26,6 +26,7 @@
 
 #if USE(COORDINATED_GRAPHICS)
 
+#include "CairoUtilities.h"
 #include "FloatQuad.h"
 #include "GraphicsContext.h"
 #include "GraphicsLayer.h"
@@ -705,10 +706,7 @@ void CoordinatedGraphicsLayer::setNeedsDisplayInRect(const FloatRect& initialRec
     if (alreadyRecorded)
         return;
 
-    if (rects.size() < 32)
-        rects.append(rect);
-    else
-        rects[0].unite(rect);
+    rects.append(rect);
 
     notifyFlushRequired();
     addRepaintRect(rect);
@@ -895,7 +893,7 @@ void CoordinatedGraphicsLayer::flushCompositingStateForThisLayerOnly()
         ASSERT(m_compositedImage);
         auto& image = *m_compositedImage;
         uintptr_t imageID = reinterpret_cast<uintptr_t>(&image);
-        uintptr_t nativeImageID = reinterpret_cast<uintptr_t>(m_compositedNativeImage->platformImage().get());
+        uintptr_t nativeImageID = getSurfaceUniqueID(m_compositedNativeImage->platformImage().get());
 
         // Respawn the ImageBacking object if the underlying image changed.
         if (m_nicosia.imageBacking) {
@@ -913,7 +911,7 @@ void CoordinatedGraphicsLayer::flushCompositingStateForThisLayerOnly()
         auto& layerState = m_nicosia.imageBacking->layerState();
         layerState.imageID = imageID;
         layerState.update.isVisible = transformedVisibleRect().intersects(IntRect(contentsRect()));
-        if (layerState.update.isVisible && layerState.update.nativeImageID != nativeImageID) {
+        if (layerState.update.isVisible && (!nativeImageID || layerState.update.nativeImageID != nativeImageID)) {
             layerState.update.nativeImageID = nativeImageID;
             layerState.update.imageBackingStore = m_coordinator->imageBackingStore(nativeImageID,
                 [&] {
@@ -1420,9 +1418,7 @@ bool CoordinatedGraphicsLayer::addAnimation(const KeyframeValueList& valueList, 
         return false;
 
     switch (valueList.property()) {
-#if ENABLE(FILTERS_LEVEL_2)
     case AnimatedProperty::WebkitBackdropFilter:
-#endif
     case AnimatedProperty::Filter: {
         int listIndex = validateFilterOperations(valueList);
         if (listIndex < 0)

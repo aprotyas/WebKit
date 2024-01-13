@@ -15,6 +15,9 @@ list(APPEND WebCore_PRIVATE_INCLUDE_DIRECTORIES
 )
 
 list(APPEND WebCore_SOURCES
+    accessibility/playstation/AXObjectCachePlaystation.cpp
+    accessibility/playstation/AccessibilityObjectPlaystation.cpp
+
     editing/libwpe/EditorLibWPE.cpp
 
     page/playstation/ResourceUsageOverlayPlayStation.cpp
@@ -74,6 +77,10 @@ list(APPEND WebCore_USER_AGENT_STYLE_SHEETS
 list(APPEND WebCore_LIBRARIES
     WPE::libwpe
     WebKitRequirements::WebKitResources
+)
+
+list(APPEND WebCore_PRIVATE_FRAMEWORK_HEADERS
+    platform/graphics/libwpe/PlatformDisplayLibWPE.h
 )
 
 if (ENABLE_GAMEPAD)

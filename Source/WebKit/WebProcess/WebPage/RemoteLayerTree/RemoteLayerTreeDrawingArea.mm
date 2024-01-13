@@ -71,8 +71,6 @@ RemoteLayerTreeDrawingArea::RemoteLayerTreeDrawingArea(WebPage& webPage, const W
     , m_scheduleRenderingTimer(*this, &RemoteLayerTreeDrawingArea::scheduleRenderingUpdateTimerFired)
     , m_preferredFramesPerSecond(DefaultPreferredFramesPerSecond)
 {
-    webPage.corePage()->settings().setForceCompositingMode(true);
-
     if (auto viewExposedRect = parameters.viewExposedRect)
         setViewExposedRect(viewExposedRect);
 }
@@ -143,6 +141,14 @@ void RemoteLayerTreeDrawingArea::addRootFrame(WebCore::FrameIdentifier frameID)
         nullptr,
         frameID
     });
+}
+
+void RemoteLayerTreeDrawingArea::removeRootFrame(WebCore::FrameIdentifier frameID)
+{
+    auto count = m_rootLayers.removeAllMatching([frameID] (const auto& layer) {
+        return layer.frameID == frameID;
+    });
+    ASSERT_UNUSED(count, count == 1);
 }
 
 void RemoteLayerTreeDrawingArea::setRootCompositingLayer(WebCore::Frame& frame, GraphicsLayer* rootGraphicsLayer)
@@ -361,6 +367,7 @@ void RemoteLayerTreeDrawingArea::updateRendering()
         rootLayer.layer->flushCompositingStateForThisLayerOnly();
 
         RemoteLayerTreeTransaction layerTransaction;
+        layerTransaction.setProcessIdentifier(WebCore::Process::identifier());
         layerTransaction.setTransactionID(transactionID);
         layerTransaction.setCallbackIDs(WTFMove(m_pendingCallbackIDs));
 

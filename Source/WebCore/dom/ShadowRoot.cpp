@@ -51,7 +51,7 @@ WTF_MAKE_ISO_ALLOCATED_IMPL(ShadowRoot);
 
 struct SameSizeAsShadowRoot : public DocumentFragment, public TreeScope {
     uint8_t flagsAndModes[3];
-    CheckedPtr<Element> host;
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> host;
     void* styleSheetList;
     void* styleScope;
     void* slotAssignment;
@@ -64,7 +64,7 @@ static_assert(sizeof(WeakPtr<Element, WeakPtrImplWithEventTargetData>) == sizeof
 #endif
 
 ShadowRoot::ShadowRoot(Document& document, ShadowRootMode mode, SlotAssignmentMode assignmentMode, DelegatesFocus delegatesFocus, Cloneable cloneable, AvailableToElementInternals availableToElementInternals)
-    : DocumentFragment(document, CreateShadowRoot)
+    : DocumentFragment(document, TypeFlag::IsShadowRoot)
     , TreeScope(*this, document)
     , m_delegatesFocus(delegatesFocus == DelegatesFocus::Yes)
     , m_isCloneable(cloneable == Cloneable::Yes)
@@ -73,19 +73,21 @@ ShadowRoot::ShadowRoot(Document& document, ShadowRootMode mode, SlotAssignmentMo
     , m_slotAssignmentMode(assignmentMode)
     , m_styleScope(makeUnique<Style::Scope>(*this))
 {
+    setEventTargetFlag(EventTargetFlag::IsInShadowTree);
     if (m_mode == ShadowRootMode::UserAgent)
-        setNodeFlag(NodeFlag::HasBeenInUserAgentShadowTree);
+        setEventTargetFlag(EventTargetFlag::HasBeenInUserAgentShadowTree);
 }
 
 
 ShadowRoot::ShadowRoot(Document& document, std::unique_ptr<SlotAssignment>&& slotAssignment)
-    : DocumentFragment(document, CreateShadowRoot)
+    : DocumentFragment(document, TypeFlag::IsShadowRoot)
     , TreeScope(*this, document)
     , m_mode(ShadowRootMode::UserAgent)
     , m_styleScope(makeUnique<Style::Scope>(*this))
     , m_slotAssignment(WTFMove(slotAssignment))
 {
-    setNodeFlag(NodeFlag::HasBeenInUserAgentShadowTree);
+    setEventTargetFlag(EventTargetFlag::IsInShadowTree);
+    setEventTargetFlag(EventTargetFlag::HasBeenInUserAgentShadowTree);
 }
 
 
@@ -188,6 +190,27 @@ StyleSheetList& ShadowRoot::styleSheets()
     return *m_styleSheetList;
 }
 
+ExceptionOr<void> ShadowRoot::replaceChildrenWithMarkup(const String& markup, OptionSet<ParserContentPolicy> parserContentPolicy)
+{
+    auto policy = OptionSet<ParserContentPolicy> { ParserContentPolicy::AllowScriptingContent } | parserContentPolicy;
+
+    if (markup.isEmpty()) {
+        ChildListMutationScope mutation(*this);
+        removeChildren();
+        return { };
+    }
+
+    auto fragment = createFragmentForInnerOuterHTML(*protectedHost(), markup, policy);
+    if (fragment.hasException())
+        return fragment.releaseException();
+    return replaceChildrenWithFragment(*this, fragment.releaseReturnValue());
+}
+
+ExceptionOr<void> ShadowRoot::setHTMLUnsafe(const String& html)
+{
+    return replaceChildrenWithMarkup(html, { ParserContentPolicy::AllowDeclarativeShadowRoots, ParserContentPolicy::AlwaysParseAsHTML });
+}
+
 String ShadowRoot::innerHTML() const
 {
     return serializeFragment(*this, SerializedNodes::SubtreesOfChildren, nullptr, ResolveURLs::NoExcludingURLsForPrivacy);
@@ -195,16 +218,7 @@ String ShadowRoot::innerHTML() const
 
 ExceptionOr<void> ShadowRoot::setInnerHTML(const String& markup)
 {
-    if (markup.isEmpty()) {
-        ChildListMutationScope mutation(*this);
-        removeChildren();
-        return { };
-    }
-
-    auto fragment = createFragmentForInnerOuterHTML(*protectedHost(), markup, { ParserContentPolicy::AllowScriptingContent, ParserContentPolicy::AllowPluginContent });
-    if (fragment.hasException())
-        return fragment.releaseException();
-    return replaceChildrenWithFragment(*this, fragment.releaseReturnValue());
+    return replaceChildrenWithMarkup(markup, { });
 }
 
 bool ShadowRoot::childTypeAllowed(NodeType type) const

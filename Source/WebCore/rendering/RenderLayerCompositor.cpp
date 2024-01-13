@@ -156,9 +156,7 @@ struct RenderLayerCompositor::CompositingState {
         childState.descendantsRequireCompositingUpdate = descendantsRequireCompositingUpdate;
         childState.ancestorHasTransformAnimation = ancestorHasTransformAnimation;
         childState.hasCompositedNonContainedDescendants = false;
-#if ENABLE(CSS_COMPOSITING)
         childState.hasNotIsolatedCompositedBlendingDescendants = false; // FIXME: should this only be reset for stacking contexts?
-#endif
         childState.hasBackdropFilterDescendantsWithoutRoot = false;
 #if !LOG_DISABLED
         childState.depth = depth + 1;
@@ -198,10 +196,8 @@ struct RenderLayerCompositor::CompositingState {
 
         hasCompositedNonContainedDescendants = computeHasCompositedNonContainedDescendants();
 
-#if ENABLE(CSS_COMPOSITING)
         if ((layer.isComposited() && layer.hasBlendMode()) || (layer.hasNotIsolatedCompositedBlendingDescendants() && !layer.isolatesCompositedBlending()))
             hasNotIsolatedCompositedBlendingDescendants = true;
-#endif
 
         if ((layer.isComposited() && layer.hasBackdropFilter()) || (layer.hasBackdropFilterDescendantsWithoutRoot() && !layer.isBackdropRoot()))
             hasBackdropFilterDescendantsWithoutRoot = true;
@@ -221,9 +217,7 @@ struct RenderLayerCompositor::CompositingState {
     bool descendantsRequireCompositingUpdate { false };
     bool ancestorHasTransformAnimation { false };
     bool hasCompositedNonContainedDescendants { false };
-#if ENABLE(CSS_COMPOSITING)
     bool hasNotIsolatedCompositedBlendingDescendants { false };
-#endif
     bool hasBackdropFilterDescendantsWithoutRoot { false };
 #if !LOG_DISABLED
     unsigned depth { 0 };
@@ -294,8 +288,8 @@ public:
     BackingSharingState() = default;
 
     struct Provider {
-        WeakPtr<RenderLayer> providerLayer;
-        WeakListHashSet<RenderLayer> sharingLayers;
+        SingleThreadWeakPtr<RenderLayer> providerLayer;
+        SingleThreadWeakListHashSet<RenderLayer> sharingLayers;
         LayoutRect absoluteBounds;
     };
 
@@ -331,7 +325,7 @@ private:
 
     Vector<Provider> m_backingProviderCandidates;
     RenderLayer* m_backingSharingStackingContext { nullptr };
-    WeakHashSet<RenderLayer> m_layersPendingRepaint;
+    SingleThreadWeakHashSet<RenderLayer> m_layersPendingRepaint;
 };
 
 WTF::TextStream& operator<<(WTF::TextStream&, const RenderLayerCompositor::BackingSharingState::Provider&);
@@ -841,17 +835,16 @@ static std::optional<ScrollingNodeID> frameHostingNodeForFrame(LocalFrame& frame
     if (!ownerElement)
         return { };
 
-    auto* frameRenderer = ownerElement->renderer();
-    if (!frameRenderer || !is<RenderWidget>(frameRenderer))
+    RefPtr widgetRenderer = dynamicDowncast<RenderWidget>(ownerElement->renderer());
+    if (!widgetRenderer)
         return { };
 
-    auto& widgetRenderer = downcast<RenderWidget>(*frameRenderer);
-    if (!widgetRenderer.hasLayer() || !widgetRenderer.layer()->isComposited()) {
+    if (!widgetRenderer->hasLayer() || !widgetRenderer->layer()->isComposited()) {
         LOG(Scrolling, "frameHostingNodeForFrame: frame renderer has no layer or is not composited.");
         return { };
     }
 
-    if (auto frameHostingNodeID = widgetRenderer.layer()->backing()->scrollingNodeIDForRole(ScrollCoordinationRole::FrameHosting))
+    if (auto frameHostingNodeID = widgetRenderer->layer()->backing()->scrollingNodeIDForRole(ScrollCoordinationRole::FrameHosting))
         return frameHostingNodeID;
 
     return { };
@@ -1215,7 +1208,6 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
             willBeComposited = true;
     }
 
-#if ENABLE(CSS_COMPOSITING)
     bool isolatedCompositedBlending = layer.isolatesCompositedBlending();
     layer.setHasNotIsolatedCompositedBlendingDescendants(currentState.hasNotIsolatedCompositedBlendingDescendants);
     if (layer.isolatesCompositedBlending() != isolatedCompositedBlending) {
@@ -1224,7 +1216,6 @@ void RenderLayerCompositor::computeCompositingRequirements(RenderLayer* ancestor
     }
 
     ASSERT(!layer.hasNotIsolatedCompositedBlendingDescendants() || layer.hasNotIsolatedBlendingDescendants());
-#endif
 
     bool isBackdropRoot = layer.isBackdropRoot();
     layer.setHasBackdropFilterDescendantsWithoutRoot(currentState.hasBackdropFilterDescendantsWithoutRoot);
@@ -2054,16 +2045,20 @@ bool RenderLayerCompositor::updateBacking(RenderLayer& layer, RequiresCompositin
     }
 
 #if ENABLE(VIDEO)
-    if (layerChanged && is<RenderVideo>(layer.renderer())) {
-        // If it's a video, give the media player a chance to hook up to the layer.
-        downcast<RenderVideo>(layer.renderer()).acceleratedRenderingStateChanged();
+    if (layerChanged) {
+        if (CheckedPtr renderVideo = dynamicDowncast<RenderVideo>(layer.renderer())) {
+            // If it's a video, give the media player a chance to hook up to the layer.
+            renderVideo->acceleratedRenderingStateChanged();
+        }
     }
 #endif
 
-    if (layerChanged && is<RenderWidget>(layer.renderer())) {
-        auto* innerCompositor = frameContentsCompositor(downcast<RenderWidget>(layer.renderer()));
-        if (innerCompositor && innerCompositor->usesCompositing())
-            innerCompositor->updateRootLayerAttachment();
+    if (layerChanged) {
+        if (RefPtr renderWidget = dynamicDowncast<RenderWidget>(layer.renderer())) {
+            auto* innerCompositor = frameContentsCompositor(*renderWidget);
+            if (innerCompositor && innerCompositor->usesCompositing())
+                innerCompositor->updateRootLayerAttachment();
+        }
     }
     
     if (layerChanged)
@@ -2256,10 +2251,10 @@ void RenderLayerCompositor::computeClippingScopes(const RenderLayer& layer, Over
         traverseAncestorLayers(layer, [&](const RenderLayer& ancestorLayer, bool inContainingBlockChain, bool) {
             if (inContainingBlockChain && createsClippingScope(ancestorLayer)) {
                 LayoutRect clipRect;
-                if (is<RenderBox>(ancestorLayer.renderer())) {
+                if (CheckedPtr box = dynamicDowncast<RenderBox>(ancestorLayer.renderer())) {
                     // FIXME: This is expensive. Broken with transforms.
                     LayoutPoint offsetFromRoot = ancestorLayer.convertToLayerCoords(&rootLayer, { });
-                    clipRect = downcast<RenderBox>(ancestorLayer.renderer()).overflowClipRect(offsetFromRoot);
+                    clipRect = box->overflowClipRect(offsetFromRoot);
                 }
 
                 LayerOverlapMap::LayerAndBounds layerAndBounds { const_cast<RenderLayer&>(ancestorLayer), clipRect };
@@ -2450,7 +2445,7 @@ void RenderLayerCompositor::updateScrollLayerClipping()
     if (layerForClipping == m_clipLayer) {
         EventRegion eventRegion;
         auto eventRegionContext = eventRegion.makeContext();
-        eventRegionContext.unite(IntRect({ }, layerSize), m_renderView, RenderStyle::defaultStyle());
+        eventRegionContext.unite(FloatRoundedRect(FloatRect({ }, layerSize)), m_renderView, RenderStyle::defaultStyle());
 #if ENABLE(INTERACTION_REGIONS_IN_EVENT_REGION)
         eventRegionContext.copyInteractionRegionsToEventRegion();
 #endif
@@ -2507,8 +2502,9 @@ void RenderLayerCompositor::rootLayerConfigurationChanged()
 void RenderLayerCompositor::updateCompositingForLayerTreeAsTextDump()
 {
     auto& frameView = m_renderView.frameView();
-    frameView.updateLayoutAndStyleIfNeededRecursive();
-    
+
+    frameView.updateLayoutAndStyleIfNeededRecursive(LayoutOptions::UpdateCompositingLayers);
+
     updateEventRegions();
 
     for (auto* child = frameView.frame().tree().firstRenderedChild(); child; child = child->tree().traverseNextRendered()) {
@@ -2608,6 +2604,17 @@ bool RenderLayerCompositor::attachWidgetContentLayers(RenderWidget& renderer)
     if (isCompositedPlugin(renderer)) {
         if (auto* contentsLayer = backing->layerForContents()) {
             addContentsLayerChildIfNecessary(*contentsLayer);
+
+            if (isLayerForPluginWithScrollCoordinatedContents(*layer)) {
+                if (auto pluginHostingNodeID = backing->scrollingNodeIDForRole(ScrollCoordinationRole::PluginHosting)) {
+                    auto* renderEmbeddedObject = dynamicDowncast<RenderEmbeddedObject>(renderer);
+                    if (auto pluginScrollingNodeID = renderEmbeddedObject->scrollingNodeID()) {
+                        if (auto* scrollingCoordinator = this->scrollingCoordinator())
+                            scrollingCoordinator->insertNode(ScrollingNodeType::PluginScrolling, pluginScrollingNodeID, pluginHostingNodeID, 0);
+                    }
+                }
+            }
+
             return true;
         }
     }
@@ -2992,13 +2999,12 @@ OptionSet<CompositingReason> RenderLayerCompositor::reasonsForCompositing(const 
         if (layer.isBackdropRoot())
             reasons.add(CompositingReason::BackdropRoot);
 
-#if ENABLE(CSS_COMPOSITING)
         if (layer.isolatesCompositedBlending())
             reasons.add(CompositingReason::IsolatesCompositedBlendingDescendants);
 
         if (layer.hasBlendMode())
             reasons.add(CompositingReason::BlendingWithCompositedDescendants);
-#endif
+
         if (renderer.hasClipPath())
             reasons.add(CompositingReason::ClipsCompositingDescendants);
         break;
@@ -3314,10 +3320,8 @@ bool RenderLayerCompositor::requiresCompositingForAnimation(RenderLayerModelObje
             return (effectsStack->isCurrentlyAffectingProperty(CSSPropertyOpacity)
                 && (usesCompositing() || (m_compositingTriggers & ChromeClient::AnimatedOpacityTrigger)))
                 || effectsStack->isCurrentlyAffectingProperty(CSSPropertyFilter)
-#if ENABLE(FILTERS_LEVEL_2)
                 || effectsStack->isCurrentlyAffectingProperty(CSSPropertyBackdropFilter)
                 || effectsStack->isCurrentlyAffectingProperty(CSSPropertyWebkitBackdropFilter)
-#endif
                 || effectsStack->isCurrentlyAffectingProperty(CSSPropertyTranslate)
                 || effectsStack->isCurrentlyAffectingProperty(CSSPropertyScale)
                 || effectsStack->isCurrentlyAffectingProperty(CSSPropertyRotate)
@@ -3361,8 +3365,7 @@ bool RenderLayerCompositor::requiresCompositingForTransform(RenderLayerModelObje
 
     auto compositingPolicy = m_compositingPolicy;
 #if !USE(COMPOSITING_FOR_SMALL_CANVASES)
-    if (is<HTMLCanvasElement>(renderer.element())) {
-        auto* canvas = downcast<HTMLCanvasElement>(renderer.element());
+    if (auto* canvas = dynamicDowncast<HTMLCanvasElement>(renderer.element())) {
         auto canvasArea = canvas->size().area<RecordOverflow>();
         if (!canvasArea.hasOverflowed() && canvasArea < canvasAreaThresholdRequiringCompositing)
             compositingPolicy = CompositingPolicy::Conservative;
@@ -3406,11 +3409,11 @@ bool RenderLayerCompositor::requiresCompositingForVideo(RenderLayerModelObject& 
         return false;
 
 #if ENABLE(VIDEO)
-    if (!is<RenderVideo>(renderer))
+    CheckedPtr video = dynamicDowncast<RenderVideo>(renderer);
+    if (!video)
         return false;
 
-    auto& video = downcast<RenderVideo>(renderer);
-    if ((video.requiresImmediateCompositing() || video.shouldDisplayVideo()) && canAccelerateVideoRendering(video))
+    if ((video->requiresImmediateCompositing() || video->shouldDisplayVideo()) && canAccelerateVideoRendering(*video))
         return true;
 #else
     UNUSED_PARAM(renderer);
@@ -3445,10 +3448,8 @@ bool RenderLayerCompositor::requiresCompositingForCanvas(RenderLayerModelObject&
 
 bool RenderLayerCompositor::requiresCompositingForFilters(RenderLayerModelObject& renderer) const
 {
-#if ENABLE(FILTERS_LEVEL_2)
     if (renderer.hasBackdropFilter())
         return true;
-#endif
 
     if (!(m_compositingTriggers & ChromeClient::FilterTrigger))
         return false;
@@ -3516,23 +3517,23 @@ bool RenderLayerCompositor::requiresCompositingForPlugin(RenderLayerModelObject&
     
 bool RenderLayerCompositor::requiresCompositingForFrame(RenderLayerModelObject& renderer, RequiresCompositingData& queryData) const
 {
-    if (!is<RenderWidget>(renderer))
+    RefPtr frameRenderer = dynamicDowncast<RenderWidget>(renderer);
+    if (!frameRenderer)
         return false;
 
-    auto& frameRenderer = downcast<RenderWidget>(renderer);
-    if (frameRenderer.style().visibility() != Visibility::Visible)
+    if (frameRenderer->style().visibility() != Visibility::Visible)
         return false;
 
-    if (!frameRenderer.requiresAcceleratedCompositing())
+    if (!frameRenderer->requiresAcceleratedCompositing())
         return false;
 
     if (queryData.layoutUpToDate == LayoutUpToDate::No) {
         queryData.reevaluateAfterLayout = true;
-        return frameRenderer.isComposited();
+        return frameRenderer->isComposited();
     }
 
     // Don't go into compositing mode if height or width are zero.
-    return !snappedIntRect(frameRenderer.contentBoxRect()).isEmpty();
+    return !snappedIntRect(frameRenderer->contentBoxRect()).isEmpty();
 }
 
 bool RenderLayerCompositor::requiresCompositingForScrollableFrame(RequiresCompositingData& queryData) const
@@ -3860,10 +3861,11 @@ static Vector<ScrollingNodeID> collectRelatedCoordinatedScrollingNodes(const Ren
 
 bool RenderLayerCompositor::isLayerForIFrameWithScrollCoordinatedContents(const RenderLayer& layer) const
 {
-    if (!is<RenderWidget>(layer.renderer()))
+    auto* renderWidget = dynamicDowncast<RenderWidget>(layer.renderer());
+    if (!renderWidget)
         return false;
 
-    auto* contentDocument = downcast<RenderWidget>(layer.renderer()).frameOwnerElement().contentDocument();
+    auto* contentDocument = renderWidget->frameOwnerElement().contentDocument();
     if (!contentDocument)
         return false;
 
@@ -3875,6 +3877,15 @@ bool RenderLayerCompositor::isLayerForIFrameWithScrollCoordinatedContents(const 
         return scrollingCoordinator->coordinatesScrollingForFrameView(view->frameView());
 
     return false;
+}
+
+bool RenderLayerCompositor::isLayerForPluginWithScrollCoordinatedContents(const RenderLayer& layer) const
+{
+    CheckedPtr renderEmbeddedObject = dynamicDowncast<RenderEmbeddedObject>(layer.renderer());
+    if (!renderEmbeddedObject)
+        return false;
+
+    return renderEmbeddedObject->usesAsyncScrolling();
 }
 
 bool RenderLayerCompositor::isRunningTransformAnimation(RenderLayerModelObject& renderer) const
@@ -4791,11 +4802,14 @@ static inline ScrollCoordinationRole scrollCoordinationRoleForNodeType(Scrolling
     case ScrollingNodeType::MainFrame:
     case ScrollingNodeType::Subframe:
     case ScrollingNodeType::Overflow:
+    case ScrollingNodeType::PluginScrolling:
         return ScrollCoordinationRole::Scrolling;
     case ScrollingNodeType::OverflowProxy:
         return ScrollCoordinationRole::ScrollingProxy;
     case ScrollingNodeType::FrameHosting:
         return ScrollCoordinationRole::FrameHosting;
+    case ScrollingNodeType::PluginHosting:
+        return ScrollCoordinationRole::PluginHosting;
     case ScrollingNodeType::Fixed:
     case ScrollingNodeType::Sticky:
         return ScrollCoordinationRole::ViewportConstrained;
@@ -4809,6 +4823,9 @@ static inline ScrollCoordinationRole scrollCoordinationRoleForNodeType(Scrolling
 ScrollingNodeID RenderLayerCompositor::attachScrollingNode(RenderLayer& layer, ScrollingNodeType nodeType, ScrollingTreeState& treeState)
 {
     auto* scrollingCoordinator = this->scrollingCoordinator();
+    if (!scrollingCoordinator)
+        return 0;
+
     auto* backing = layer.backing();
     // Crash logs suggest that backing can be null here, but we don't know how: rdar://problem/18545452.
     ASSERT(backing);
@@ -4905,6 +4922,8 @@ void RenderLayerCompositor::detachScrollCoordinatedLayer(RenderLayer& layer, Opt
         return;
 
     auto* scrollingCoordinator = this->scrollingCoordinator();
+    if (!scrollingCoordinator)
+        return;
 
     if (roles.contains(ScrollCoordinationRole::Scrolling))
         detachScrollCoordinatedLayerWithRole(layer, *scrollingCoordinator, ScrollCoordinationRole::Scrolling);
@@ -4914,6 +4933,9 @@ void RenderLayerCompositor::detachScrollCoordinatedLayer(RenderLayer& layer, Opt
 
     if (roles.contains(ScrollCoordinationRole::FrameHosting))
         detachScrollCoordinatedLayerWithRole(layer, *scrollingCoordinator, ScrollCoordinationRole::FrameHosting);
+
+    if (roles.contains(ScrollCoordinationRole::PluginHosting))
+        detachScrollCoordinatedLayerWithRole(layer, *scrollingCoordinator, ScrollCoordinationRole::PluginHosting);
 
     if (roles.contains(ScrollCoordinationRole::ViewportConstrained))
         detachScrollCoordinatedLayerWithRole(layer, *scrollingCoordinator, ScrollCoordinationRole::ViewportConstrained);
@@ -4947,6 +4969,9 @@ OptionSet<ScrollCoordinationRole> RenderLayerCompositor::coordinatedScrollingRol
 
     if (isLayerForIFrameWithScrollCoordinatedContents(layer))
         coordinationRoles.add(ScrollCoordinationRole::FrameHosting);
+
+    if (isLayerForPluginWithScrollCoordinatedContents(layer))
+        coordinationRoles.add(ScrollCoordinationRole::PluginHosting);
 
     return coordinationRoles;
 }
@@ -5009,6 +5034,11 @@ ScrollingNodeID RenderLayerCompositor::updateScrollCoordinationForLayer(RenderLa
     else
         detachScrollCoordinatedLayer(layer, ScrollCoordinationRole::FrameHosting);
 
+    if (roles.contains(ScrollCoordinationRole::PluginHosting))
+        newNodeID = updateScrollingNodeForPluginHostingRole(layer, *currentTreeState, changes);
+    else
+        detachScrollCoordinatedLayer(layer, ScrollCoordinationRole::PluginHosting);
+
     return newNodeID;
 }
 
@@ -5060,13 +5090,16 @@ RoundedRect RenderLayerCompositor::parentRelativeScrollableRect(const RenderLaye
         return RoundedRect { LayoutRect({ }, LayoutSize(layer.scrollableArea()->visibleSize())) };
     }
 
-    if (!is<RenderBox>(layer.renderer()))
-        return RoundedRect { LayoutRect { } };
+    RoundedRect scrollableRect(LayoutRect { });
+    {
+        CheckedPtr box = dynamicDowncast<RenderBox>(layer.renderer());
+        if (!box)
+            return RoundedRect { LayoutRect { } };
 
-    auto& box = downcast<RenderBox>(layer.renderer());
-    auto scrollableRect = RoundedRect { box.paddingBoxRect() };
-    if (box.style().hasBorderRadius())
-        scrollableRect = box.style().getRoundedInnerBorderFor(box.borderBoxRect());
+        scrollableRect = RoundedRect { box->paddingBoxRect() };
+        if (box->style().hasBorderRadius())
+            scrollableRect = box->style().getRoundedInnerBorderFor(box->borderBoxRect());
+    }
 
     auto offset = layer.convertToLayerCoords(ancestorLayer, scrollableRect.rect().location()); // FIXME: broken for columns.
     auto rect = scrollableRect.rect();
@@ -5077,6 +5110,10 @@ RoundedRect RenderLayerCompositor::parentRelativeScrollableRect(const RenderLaye
 
 void RenderLayerCompositor::updateScrollingNodeLayers(ScrollingNodeID nodeID, RenderLayer& layer, ScrollingCoordinator& scrollingCoordinator)
 {
+    // Plugins handle their own scrolling node layers.
+    if (isLayerForPluginWithScrollCoordinatedContents(layer))
+        return;
+
     if (layer.isRenderViewLayer()) {
         LocalFrameView& frameView = m_renderView.frameView();
         scrollingCoordinator.setNodeLayers(nodeID, { nullptr,
@@ -5125,7 +5162,11 @@ ScrollingNodeID RenderLayerCompositor::updateScrollingNodeForScrollingRole(Rende
             ASSERT_NOT_REACHED();
             return treeState.parentNodeID.value_or(0);
         }
-        
+
+        // Plugins handle their own scrolling node layers and geometry.
+        if (isLayerForPluginWithScrollCoordinatedContents(layer))
+            return newNodeID;
+
         if (changes & ScrollingNodeChangeFlags::Layer)
             updateScrollingNodeLayers(newNodeID, layer, *scrollingCoordinator);
 
@@ -5207,6 +5248,19 @@ ScrollingNodeID RenderLayerCompositor::updateScrollingNodeForFrameHostingRole(Re
 
     if (changes & ScrollingNodeChangeFlags::Layer)
         scrollingCoordinator->setNodeLayers(newNodeID, { layer.backing()->graphicsLayer() });
+
+    return newNodeID;
+}
+
+ScrollingNodeID RenderLayerCompositor::updateScrollingNodeForPluginHostingRole(RenderLayer& layer, ScrollingTreeState& treeState, OptionSet<ScrollingNodeChangeFlags> changes)
+{
+    UNUSED_PARAM(changes);
+
+    auto newNodeID = attachScrollingNode(layer, ScrollingNodeType::PluginHosting, treeState);
+    if (!newNodeID) {
+        ASSERT_NOT_REACHED();
+        return treeState.parentNodeID.value_or(0);
+    }
 
     return newNodeID;
 }

@@ -934,11 +934,6 @@ framework module WebKit_Private [system] {
     export *
   }
 
-  explicit module WKBundleInspector {
-    header "WKBundleInspector.h"
-    export *
-  }
-
   explicit module WKBundleMac {
     header "WKBundleMac.h"
     export *
@@ -1756,11 +1751,6 @@ framework module WebKit_Private [system] {
 
   explicit module WKType {
     header "WKType.h"
-    export *
-  }
-
-  explicit module WKTypeRefWrapper {
-    header "WKTypeRefWrapper.h"
     export *
   }
 
@@ -3078,6 +3068,16 @@ framework module WebKit_Private [system] {
 
   explicit module _WKWebExtensionControllerPrivate {
     header "_WKWebExtensionControllerPrivate.h"
+    export *
+  }
+
+  explicit module _WKWebExtensionDeclarativeNetRequestRule {
+    header "_WKWebExtensionDeclarativeNetRequestRule.h"
+    export *
+  }
+
+  explicit module _WKWebExtensionDeclarativeNetRequestTranslator {
+    header "_WKWebExtensionDeclarativeNetRequestTranslator.h"
     export *
   }
 

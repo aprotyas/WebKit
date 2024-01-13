@@ -29,9 +29,9 @@
 #include "Element.h"
 #include "ExceptionOr.h"
 #include "FloatSize.h"
-#include "FragmentScriptingPermission.h"
 #include "HTMLInterchange.h"
 #include "MarkupExclusionRule.h"
+#include "ParserContentPolicy.h"
 #include <wtf/Forward.h>
 #include <wtf/Function.h>
 #include <wtf/HashMap.h>
@@ -56,7 +56,7 @@ struct SimpleRange;
 void replaceSubresourceURLs(Ref<DocumentFragment>&&, HashMap<AtomString, AtomString>&&);
 void removeSubresourceURLAttributes(Ref<DocumentFragment>&&, Function<bool(const URL&)> shouldRemoveURL);
 
-std::unique_ptr<Page> createPageForSanitizingWebContent();
+Ref<Page> createPageForSanitizingWebContent();
 enum class MSOListQuirks : bool { CheckIfNeeded, Disabled };
 String sanitizeMarkup(const String&, MSOListQuirks = MSOListQuirks::Disabled, std::optional<Function<void(DocumentFragment&)>> fragmentSanitizer = std::nullopt);
 String sanitizedMarkupForFragmentInDocument(Ref<DocumentFragment>&&, Document&, MSOListQuirks, const String& originalMarkup);
@@ -80,7 +80,7 @@ private:
 };
 
 WEBCORE_EXPORT Ref<DocumentFragment> createFragmentFromText(const SimpleRange& context, const String& text);
-WEBCORE_EXPORT Ref<DocumentFragment> createFragmentFromMarkup(Document&, const String& markup, const String& baseURL, OptionSet<ParserContentPolicy> = { ParserContentPolicy::AllowScriptingContent, ParserContentPolicy::AllowPluginContent });
+WEBCORE_EXPORT Ref<DocumentFragment> createFragmentFromMarkup(Document&, const String& markup, const String& baseURL, OptionSet<ParserContentPolicy> = { ParserContentPolicy::AllowScriptingContent });
 ExceptionOr<Ref<DocumentFragment>> createFragmentForInnerOuterHTML(Element&, const String& markup, OptionSet<ParserContentPolicy>);
 RefPtr<DocumentFragment> createFragmentForTransformToFragment(Document&, String&& sourceString, const String& sourceMIMEType);
 Ref<DocumentFragment> createFragmentForImageAndURL(Document&, const String&, PresentationSize preferredSize);

@@ -377,8 +377,9 @@ ExceptionOr<void> CSSStyleSheet::deleteRule(unsigned index)
         return Exception { ExceptionCode::IndexSizeError };
     RuleMutationScope mutationScope(this);
 
-    m_contents->wrapperDeleteRule(index);
-
+    bool success = m_contents->wrapperDeleteRule(index);
+    if (!success)
+        return Exception { ExceptionCode::InvalidStateError };
     if (!m_childRuleCSSOMWrappers.isEmpty()) {
         if (m_childRuleCSSOMWrappers[index])
             m_childRuleCSSOMWrappers[index]->setParentStyleSheet(nullptr);
@@ -412,8 +413,15 @@ RefPtr<CSSRuleList> CSSStyleSheet::cssRules()
 {
     if (!canAccessRules())
         return nullptr;
+
+    return cssRulesSkippingAccessCheck();
+}
+
+RefPtr<CSSRuleList> CSSStyleSheet::cssRulesSkippingAccessCheck()
+{
     if (!m_ruleListCSSOMWrapper)
         m_ruleListCSSOMWrapper = makeUnique<StyleSheetCSSRuleList>(this);
+
     return m_ruleListCSSOMWrapper.get();
 }
 
@@ -481,7 +489,7 @@ String CSSStyleSheet::debugDescription() const
 
 String CSSStyleSheet::cssTextWithReplacementURLs(const HashMap<String, String>& replacementURLStrings, const HashMap<RefPtr<CSSStyleSheet>, String>& replacementURLStringsForCSSStyleSheet)
 {
-    auto ruleList = cssRules();
+    auto ruleList = cssRulesSkippingAccessCheck();
     if (!ruleList)
         return { };
 
@@ -576,7 +584,10 @@ CSSStyleSheet::RuleMutationScope::RuleMutationScope(CSSRule* rule)
     , m_mutationType(is<CSSKeyframesRule>(rule) ? KeyframesRuleMutation : OtherMutation)
     , m_contentsWereClonedForMutation(ContentsWereNotClonedForMutation)
     , m_insertedKeyframesRule(nullptr)
-    , m_modifiedKeyframesRuleName(is<CSSKeyframesRule>(rule) ? downcast<CSSKeyframesRule>(*rule).name() : emptyAtom())
+    , m_modifiedKeyframesRuleName([rule] {
+        auto* cssKeyframeRule = dynamicDowncast<CSSKeyframesRule>(rule);
+        return cssKeyframeRule ? cssKeyframeRule->name() : emptyAtom();
+    }())
 {
     if (m_styleSheet)
         m_contentsWereClonedForMutation = m_styleSheet->willMutateRules();

@@ -70,6 +70,12 @@ void Type::dump(PrintStream& out) const
             case PrimitiveStruct::FrexpResult::kind:
                 out.print(*structure.values[PrimitiveStruct::FrexpResult::fract]);
                 break;
+            case PrimitiveStruct::ModfResult::kind:
+                out.print(*structure.values[PrimitiveStruct::ModfResult::fract]);
+                break;
+            case PrimitiveStruct::AtomicCompareExchangeResult::kind:
+                out.print(*structure.values[PrimitiveStruct::AtomicCompareExchangeResult::oldValue]);
+                break;
             }
             out.print(">");
         },
@@ -199,7 +205,8 @@ ConversionRank conversionRank(const Type* from, const Type* to)
         switch (primitivePair(fromPrimitive->kind, toPrimitive->kind)) {
         case primitivePair(Primitive::AbstractFloat, Primitive::F32):
             return { 1 };
-        // FIXME: AbstractFloat to f16 should return 2
+        case primitivePair(Primitive::AbstractFloat, Primitive::F16):
+            return { 2 };
         case primitivePair(Primitive::AbstractInt, Primitive::I32):
             return { 3 };
         case primitivePair(Primitive::AbstractInt, Primitive::U32):
@@ -208,7 +215,8 @@ ConversionRank conversionRank(const Type* from, const Type* to)
             return { 5 };
         case primitivePair(Primitive::AbstractInt, Primitive::F32):
             return { 6 };
-        // FIXME: AbstractInt to f16 should return 7
+        case primitivePair(Primitive::AbstractInt, Primitive::F16):
+            return { 7 };
         default:
             return std::nullopt;
         }
@@ -253,10 +261,13 @@ ConversionRank conversionRank(const Type* from, const Type* to)
         switch (kind) {
         case PrimitiveStruct::FrexpResult::kind:
             return conversionRank(fromPrimitiveStruct->values[PrimitiveStruct::FrexpResult::fract], toPrimitiveStruct->values[PrimitiveStruct::FrexpResult::fract]);
+        case PrimitiveStruct::ModfResult::kind:
+            return conversionRank(fromPrimitiveStruct->values[PrimitiveStruct::ModfResult::fract], toPrimitiveStruct->values[PrimitiveStruct::ModfResult::fract]);
+        case PrimitiveStruct::AtomicCompareExchangeResult::kind:
+            return std::nullopt;
         }
     }
 
-    // FIXME: add the abstract result conversion rules
     return std::nullopt;
 }
 
@@ -273,11 +284,14 @@ unsigned Type::size() const
     return WTF::switchOn(*this,
         [&](const Primitive& primitive) -> unsigned {
             switch (primitive.kind) {
+            case Types::Primitive::F16:
+                return 2;
             case Types::Primitive::F32:
             case Types::Primitive::I32:
             case Types::Primitive::U32:
                 return 4;
             case Types::Primitive::Bool:
+                return 1;
             case Types::Primitive::Void:
             case Types::Primitive::AbstractInt:
             case Types::Primitive::AbstractFloat:
@@ -345,11 +359,14 @@ unsigned Type::alignment() const
     return WTF::switchOn(*this,
         [&](const Primitive& primitive) -> unsigned {
             switch (primitive.kind) {
+            case Types::Primitive::F16:
+                return 2;
             case Types::Primitive::F32:
             case Types::Primitive::I32:
             case Types::Primitive::U32:
                 return 4;
             case Types::Primitive::Bool:
+                return 1;
             case Types::Primitive::Void:
             case Types::Primitive::AbstractInt:
             case Types::Primitive::AbstractFloat:

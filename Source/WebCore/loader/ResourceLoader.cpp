@@ -257,7 +257,8 @@ void ResourceLoader::start()
     }
 #endif
 
-    RefPtr<SecurityOrigin> sourceOrigin = is<SubresourceLoader>(*this) ? downcast<SubresourceLoader>(*this).origin() : nullptr;
+    auto* subresourceLoader = dynamicDowncast<SubresourceLoader>(*this);
+    RefPtr<SecurityOrigin> sourceOrigin = subresourceLoader ? subresourceLoader->origin() : nullptr;
     if (!sourceOrigin && frameLoader()) {
         auto* document = frameLoader()->frame().document();
         sourceOrigin =  document ? &document->securityOrigin() : nullptr;
@@ -461,9 +462,7 @@ void ResourceLoader::willSendRequestInternal(ResourceRequest&& request, const Re
     if (isRedirect) {
         RESOURCELOADER_RELEASE_LOG("willSendRequestInternal: Processing cross-origin redirect");
         platformStrategies()->loaderStrategy()->crossOriginRedirectReceived(this, request.url());
-#if ENABLE(TRACKING_PREVENTION)
         frameLoader()->client().didLoadFromRegistrableDomain(RegistrableDomain(request.url()));
-#endif
     }
     m_request = request;
 

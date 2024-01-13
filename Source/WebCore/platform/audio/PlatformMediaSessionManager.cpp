@@ -61,6 +61,10 @@ bool PlatformMediaSessionManager::m_vp8DecoderEnabled;
 bool PlatformMediaSessionManager::m_vp9SWDecoderEnabled;
 #endif
 
+#if ENABLE(EXTENSION_CAPABILITIES)
+bool PlatformMediaSessionManager::s_mediaCapabilityGrantsEnabled;
+#endif
+
 static std::unique_ptr<PlatformMediaSessionManager>& sharedPlatformMediaSessionManager()
 {
     static NeverDestroyed<std::unique_ptr<PlatformMediaSessionManager>> platformMediaSessionManager;
@@ -435,6 +439,20 @@ void PlatformMediaSessionManager::setIsPlayingToAutomotiveHeadUnit(bool isPlayin
     m_isPlayingToAutomotiveHeadUnit = isPlayingToAutomotiveHeadUnit;
 }
 
+void PlatformMediaSessionManager::setSupportsSpatialAudioPlayback(bool supportsSpatialAudioPlayback)
+{
+    if (supportsSpatialAudioPlayback == m_supportsSpatialAudioPlayback)
+        return;
+
+    ALWAYS_LOG(LOGIDENTIFIER, supportsSpatialAudioPlayback);
+    m_supportsSpatialAudioPlayback = supportsSpatialAudioPlayback;
+}
+
+std::optional<bool> PlatformMediaSessionManager::supportsSpatialAudioPlaybackForConfiguration(const MediaConfiguration&)
+{
+    return m_supportsSpatialAudioPlayback;
+}
+
 void PlatformMediaSessionManager::sessionIsPlayingToWirelessPlaybackTargetChanged(PlatformMediaSession& session)
 {
     if (!m_isApplicationInBackground || !(restrictions(session.mediaType()) & BackgroundProcessPlaybackRestricted))
@@ -792,6 +810,18 @@ void PlatformMediaSessionManager::updateNowPlayingInfoIfNecessary()
 }
 
 #endif // ENABLE(VIDEO) || ENABLE(WEB_AUDIO)
+
+#if ENABLE(EXTENSION_CAPABILITIES)
+bool PlatformMediaSessionManager::mediaCapabilityGrantsEnabled()
+{
+    return s_mediaCapabilityGrantsEnabled;
+}
+
+void PlatformMediaSessionManager::setMediaCapabilityGrantsEnabled(bool mediaCapabilityGrantsEnabled)
+{
+    s_mediaCapabilityGrantsEnabled = mediaCapabilityGrantsEnabled;
+}
+#endif
 
 #if !RELEASE_LOG_DISABLED
 WTFLogChannel& PlatformMediaSessionManager::logChannel() const

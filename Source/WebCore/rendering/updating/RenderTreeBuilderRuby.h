@@ -51,7 +51,9 @@ public:
 
     RenderElement& findOrCreateParentForChild(RenderRubyAsBlock& parent, const RenderObject& child, RenderObject*& beforeChild);
     RenderElement& findOrCreateParentForChild(RenderRubyAsInline& parent, const RenderObject& child, RenderObject*& beforeChild);
+
     RenderElement& findOrCreateParentForStyleBasedRubyChild(RenderElement& parent, const RenderObject& child, RenderObject*& beforeChild);
+    void attachForStyleBasedRuby(RenderElement& parent, RenderPtr<RenderObject> child, RenderObject* beforeChild);
 
 private:
     void moveInlineChildren(RenderRubyBase& from, RenderRubyBase& to, RenderObject* beforeChild);
@@ -61,6 +63,8 @@ private:
 
     RenderTreeBuilder& m_builder;
 };
+
+RenderStyle createAnonymousStyleForRuby(const RenderStyle& parentStyle, DisplayType);
 
 }
 

@@ -79,6 +79,8 @@ class PublicURLManager;
 class RejectedPromiseTracker;
 class RTCDataChannelRemoteHandlerConnection;
 class ResourceRequest;
+class ServiceWorker;
+class ServiceWorkerContainer;
 class SocketProvider;
 class WebCoreOpaqueRoot;
 enum class LoadedFromOpaqueSource : bool;
@@ -88,16 +90,11 @@ enum class TaskSource : uint8_t;
 class NotificationClient;
 #endif
 
-#if ENABLE(SERVICE_WORKER)
-class ServiceWorker;
-class ServiceWorkerContainer;
-#endif
-
 namespace IDBClient {
 class IDBConnectionProxy;
 }
 
-class ScriptExecutionContext : public SecurityContext, public CanMakeCheckedPtr, public TimerAlignment {
+class ScriptExecutionContext : public SecurityContext, public TimerAlignment {
 public:
     explicit ScriptExecutionContext(ScriptExecutionContextIdentifier = { });
     virtual ~ScriptExecutionContext();
@@ -264,13 +261,11 @@ public:
     DatabaseContext* databaseContext() { return m_databaseContext.get(); }
     void setDatabaseContext(DatabaseContext*);
 
-#if ENABLE(WEB_CRYPTO)
     // These two methods are used when CryptoKeys are serialized into IndexedDB. As a side effect, it is also
     // used for things that utilize the same structure clone algorithm, for example, message passing between
     // worker and document.
     virtual bool wrapCryptoKey(const Vector<uint8_t>& key, Vector<uint8_t>& wrappedKey) = 0;
     virtual bool unwrapCryptoKey(const Vector<uint8_t>& wrappedKey, Vector<uint8_t>& key) = 0;
-#endif
 
     int timerNestingLevel() const { return m_timerNestingLevel; }
     void setTimerNestingLevel(int timerNestingLevel) { m_timerNestingLevel = timerNestingLevel; }
@@ -293,7 +288,6 @@ public:
     void setDomainForCachePartition(String&& domain) { m_domainForCachePartition = WTFMove(domain); }
 
     bool allowsMediaDevices() const;
-#if ENABLE(SERVICE_WORKER)
     ServiceWorker* activeServiceWorker() const;
     void setActiveServiceWorker(RefPtr<ServiceWorker>&&);
 
@@ -304,7 +298,6 @@ public:
     ServiceWorkerContainer* serviceWorkerContainer();
     ServiceWorkerContainer* ensureServiceWorkerContainer();
     virtual void updateServiceWorkerClientData() { ASSERT_NOT_REACHED(); }
-#endif
     WEBCORE_EXPORT static bool postTaskTo(ScriptExecutionContextIdentifier, Task&&);
     WEBCORE_EXPORT static bool postTaskForModeToWorkerOrWorklet(ScriptExecutionContextIdentifier, Task&&, const String&);
     WEBCORE_EXPORT static bool ensureOnContextThread(ScriptExecutionContextIdentifier, Task&&);
@@ -407,10 +400,8 @@ private:
     bool m_inScriptExecutionContextDestructor { false };
 #endif
 
-#if ENABLE(SERVICE_WORKER)
     RefPtr<ServiceWorker> m_activeServiceWorker;
     HashMap<ServiceWorkerIdentifier, ServiceWorker*> m_serviceWorkers;
-#endif
 
     String m_domainForCachePartition;
     mutable ScriptExecutionContextIdentifier m_identifier;

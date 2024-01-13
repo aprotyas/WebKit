@@ -301,6 +301,22 @@ pdfjs-editor-ink-button-label = Rita
 pdfjs-editor-stamp-button =
     .title = Lägg till eller redigera bilder
 pdfjs-editor-stamp-button-label = Lägg till eller redigera bilder
+pdfjs-editor-remove-button =
+    .title = Ta bort
+
+## Remove button for the various kind of editor.
+
+pdfjs-editor-remove-ink-button =
+    .title = Ta bort ritning
+pdfjs-editor-remove-freetext-button =
+    .title = Ta bort text
+pdfjs-editor-remove-stamp-button =
+    .title = Ta bort bild
+pdfjs-editor-remove-highlight-button =
+    .title = Ta bort markering
+
+##
+
 # Editor Parameters
 pdfjs-editor-free-text-color-input = Färg
 pdfjs-editor-free-text-size-input = Storlek
@@ -347,3 +363,22 @@ pdfjs-editor-resizer-label-bottom-right = Nedre högra hörnet — ändra storle
 pdfjs-editor-resizer-label-bottom-middle = Nedre mitten — ändra storlek
 pdfjs-editor-resizer-label-bottom-left = Nedre vänstra hörnet — ändra storlek
 pdfjs-editor-resizer-label-middle-left = Mitten till vänster — ändra storlek
+
+## Color picker
+
+# This means "Color used to highlight text"
+pdfjs-editor-highlight-colorpicker-label = Markeringsfärg
+pdfjs-editor-colorpicker-button =
+    .title = Ändra färg
+pdfjs-editor-colorpicker-dropdown =
+    .aria-label = Färgval
+pdfjs-editor-colorpicker-yellow =
+    .title = Gul
+pdfjs-editor-colorpicker-green =
+    .title = Grön
+pdfjs-editor-colorpicker-blue =
+    .title = Blå
+pdfjs-editor-colorpicker-pink =
+    .title = Rosa
+pdfjs-editor-colorpicker-red =
+    .title = Röd

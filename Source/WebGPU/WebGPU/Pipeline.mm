@@ -30,8 +30,13 @@
 
 namespace WebGPU {
 
-std::optional<LibraryCreationResult> createLibrary(id<MTLDevice> device, const ShaderModule& shaderModule, const PipelineLayout* pipelineLayout, const String& entryPoint, NSString *label)
+std::optional<LibraryCreationResult> createLibrary(id<MTLDevice> device, const ShaderModule& shaderModule, const PipelineLayout* pipelineLayout, const String& untransformedEntryPoint, NSString *label)
 {
+    // FIXME: Remove below line when https://bugs.webkit.org/show_bug.cgi?id=266774 is completed
+    auto entryPoint = shaderModule.transformedEntryPoint(untransformedEntryPoint);
+    if (!entryPoint.length() || !shaderModule.isValid())
+        return std::nullopt;
+
     if (shaderModule.library() && pipelineLayout) {
         if (const auto* pipelineLayoutHint = shaderModule.pipelineLayoutHint(entryPoint)) {
             if (*pipelineLayoutHint == *pipelineLayout) {
@@ -55,12 +60,13 @@ std::optional<LibraryCreationResult> createLibrary(id<MTLDevice> device, const S
     auto iterator = prepareResult.entryPoints.find(entryPoint);
     if (iterator == prepareResult.entryPoints.end())
         return std::nullopt;
+
     const auto& entryPointInformation = iterator->value;
 
     return { { library, entryPointInformation } };
 }
 
-std::tuple<MTLFunctionConstantValues *, HashMap<String, WGSL::ConstantValue>> createConstantValues(uint32_t constantCount, const WGPUConstantEntry* constants, const WGSL::Reflection::EntryPointInformation& entryPointInformation)
+std::tuple<MTLFunctionConstantValues *, HashMap<String, WGSL::ConstantValue>> createConstantValues(uint32_t constantCount, const WGPUConstantEntry* constants, const WGSL::Reflection::EntryPointInformation& entryPointInformation, const ShaderModule& shaderModule)
 {
     HashMap<String, WGSL::ConstantValue> wgslConstantValues;
 
@@ -71,7 +77,7 @@ std::tuple<MTLFunctionConstantValues *, HashMap<String, WGSL::ConstantValue>> cr
             continue;
 
         auto constantValue = WGSL::evaluate(*kvp.value.defaultValue, wgslConstantValues);
-        auto addResult = wgslConstantValues.add(specializationConstant.mangledName, constantValue);
+        auto addResult = wgslConstantValues.add(kvp.key, constantValue);
         ASSERT_UNUSED(addResult, addResult.isNewEntry);
 
         switch (specializationConstant.type) {
@@ -95,38 +101,71 @@ std::tuple<MTLFunctionConstantValues *, HashMap<String, WGSL::ConstantValue>> cr
             [constantValues setConstantValue:&value type:MTLDataTypeUInt withName:specializationConstant.mangledName];
             break;
         }
+        case WGSL::Reflection::SpecializationConstantType::Half: {
+            auto value = std::get<WGSL::half>(constantValue);
+            [constantValues setConstantValue:&value type:MTLDataTypeHalf withName:specializationConstant.mangledName];
+            break;
+        }
         }
     }
 
     for (uint32_t i = 0; i < constantCount; ++i) {
         const auto& entry = constants[i];
-        auto indexIterator = entryPointInformation.specializationConstants.find(fromAPI(entry.key));
-        if (indexIterator == entryPointInformation.specializationConstants.end())
-            return { };
+        auto keyEntry = fromAPI(entry.key);
+        auto indexIterator = entryPointInformation.specializationConstants.find(keyEntry);
+        // FIXME: Remove code inside the following conditional statement when https://bugs.webkit.org/show_bug.cgi?id=266774 is completed
+        if (indexIterator == entryPointInformation.specializationConstants.end()) {
+            if (!shaderModule.hasOverride(keyEntry))
+                return { };
+
+            NSString *nsConstant = [NSString stringWithUTF8String:keyEntry.utf8().data()];
+            nsConstant = [nsConstant stringByApplyingTransform:NSStringTransformToLatin reverse:NO];
+            nsConstant = [nsConstant stringByFoldingWithOptions:NSDiacriticInsensitiveSearch locale:NSLocale.currentLocale];
+            keyEntry = nsConstant;
+            indexIterator = entryPointInformation.specializationConstants.find(keyEntry);
+            if (indexIterator == entryPointInformation.specializationConstants.end())
+                return { };
+        }
         const auto& specializationConstant = indexIterator->value;
         switch (specializationConstant.type) {
         case WGSL::Reflection::SpecializationConstantType::Boolean: {
             bool value = entry.value;
-            wgslConstantValues.set(fromAPI(entry.key), value);
+            wgslConstantValues.set(keyEntry, value);
             [constantValues setConstantValue:&value type:MTLDataTypeBool withName:specializationConstant.mangledName];
             break;
         }
         case WGSL::Reflection::SpecializationConstantType::Float: {
+            if (entry.value < std::numeric_limits<float>::lowest() || entry.value > std::numeric_limits<float>::max())
+                return { };
             float value = entry.value;
-            wgslConstantValues.set(fromAPI(entry.key), value);
+            wgslConstantValues.set(keyEntry, value);
             [constantValues setConstantValue:&value type:MTLDataTypeFloat withName:specializationConstant.mangledName];
             break;
         }
         case WGSL::Reflection::SpecializationConstantType::Int: {
+            if (entry.value < std::numeric_limits<int32_t>::min() || entry.value > std::numeric_limits<int32_t>::max())
+                return { };
             int value = entry.value;
-            wgslConstantValues.set(fromAPI(entry.key), value);
+            wgslConstantValues.set(keyEntry, value);
             [constantValues setConstantValue:&value type:MTLDataTypeInt withName:specializationConstant.mangledName];
             break;
         }
         case WGSL::Reflection::SpecializationConstantType::Unsigned: {
+            if (entry.value < 0 || entry.value > std::numeric_limits<uint32_t>::max())
+                return { };
             unsigned value = entry.value;
-            wgslConstantValues.set(fromAPI(entry.key), value);
+            wgslConstantValues.set(keyEntry, value);
             [constantValues setConstantValue:&value type:MTLDataTypeUInt withName:specializationConstant.mangledName];
+            break;
+        }
+        case WGSL::Reflection::SpecializationConstantType::Half: {
+            constexpr double halfMax = 0x1.ffcp15;
+            constexpr double halfLowest = -halfMax;
+            if (entry.value < halfLowest || entry.value > halfMax)
+                return { };
+            float value = entry.value;
+            wgslConstantValues.set(keyEntry, value);
+            [constantValues setConstantValue:&value type:MTLDataTypeHalf withName:specializationConstant.mangledName];
             break;
         }
         }

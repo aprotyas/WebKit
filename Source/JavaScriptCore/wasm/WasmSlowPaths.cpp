@@ -96,7 +96,7 @@ extern "C" void wasm_log_crash(CallFrame*, Wasm::Instance* instance)
     RELEASE_ASSERT_NOT_REACHED();
 }
 
-inline bool shouldJIT(Wasm::LLIntCallee* callee, RequiredWasmJIT requiredJIT = RequiredWasmJIT::Any)
+static inline bool shouldJIT(Wasm::LLIntCallee* callee, RequiredWasmJIT requiredJIT = RequiredWasmJIT::Any)
 {
     if (requiredJIT == RequiredWasmJIT::OMG) {
         if (!Options::useOMGJIT() || !Wasm::OMGPlan::ensureGlobalOMGAllowlist().containsWasmFunction(callee->functionIndex()))
@@ -114,7 +114,7 @@ inline bool shouldJIT(Wasm::LLIntCallee* callee, RequiredWasmJIT requiredJIT = R
     return true;
 }
 
-inline bool jitCompileAndSetHeuristics(Wasm::LLIntCallee* callee, Wasm::Instance* instance)
+static inline bool jitCompileAndSetHeuristics(Wasm::LLIntCallee* callee, Wasm::Instance* instance)
 {
     ASSERT(!instance->module().moduleInformation().usesSIMD(callee->functionIndex()));
 
@@ -164,7 +164,7 @@ inline bool jitCompileAndSetHeuristics(Wasm::LLIntCallee* callee, Wasm::Instance
     return !!callee->replacement(instance->memory()->mode());
 }
 
-inline bool jitCompileSIMDFunction(Wasm::LLIntCallee* callee, Wasm::Instance* instance)
+static inline bool jitCompileSIMDFunction(Wasm::LLIntCallee* callee, Wasm::Instance* instance)
 {
     Wasm::LLIntTierUpCounter& tierUpCounter = callee->tierUpCounter();
 
@@ -431,7 +431,10 @@ WASM_SLOW_PATH_DECL(array_new)
         WASM_RETURN(Wasm::arrayNewFixed(instance, instruction.m_typeIndex, size, reinterpret_cast<uint64_t*>(&callFrame->r(instruction.m_value))));
     }
     }
-    WASM_RETURN(Wasm::arrayNew(instance, instruction.m_typeIndex, size, value));
+    EncodedJSValue result = Wasm::arrayNew(instance, instruction.m_typeIndex, size, value);
+    if (JSValue::decode(result).isNull())
+        WASM_THROW(Wasm::ExceptionType::BadArrayNew);
+    WASM_RETURN(result);
 }
 
 WASM_SLOW_PATH_DECL(array_get)
@@ -471,7 +474,7 @@ WASM_SLOW_PATH_DECL(array_set)
     if (JSValue::decode(arrayref).isNull())
         WASM_THROW(Wasm::ExceptionType::NullArraySet);
     uint32_t index = READ(instruction.m_index).unboxedUInt32();
-    EncodedJSValue value = READ(instruction.m_value).encodedJSValue();
+    uint64_t value = static_cast<uint64_t>(READ(instruction.m_value).unboxedInt64());
 
     JSValue arrayValue = JSValue::decode(arrayref);
     ASSERT(arrayValue.isObject());
@@ -480,6 +483,23 @@ WASM_SLOW_PATH_DECL(array_set)
         WASM_THROW(Wasm::ExceptionType::OutOfBoundsArraySet);
 
     Wasm::arraySet(instance, instruction.m_typeIndex, arrayref, index, value);
+    WASM_END_IMPL();
+}
+
+WASM_SLOW_PATH_DECL(array_fill)
+{
+    SlowPathFrameTracer tracer(instance->vm(), callFrame);
+
+    auto instruction = pc->as<WasmArrayFill>();
+    EncodedJSValue arrayref = READ(instruction.m_arrayref).encodedJSValue();
+    if (JSValue::decode(arrayref).isNull())
+        WASM_THROW(Wasm::ExceptionType::NullArrayFill);
+    uint32_t offset = READ(instruction.m_offset).unboxedUInt32();
+    EncodedJSValue value = READ(instruction.m_value).encodedJSValue();
+    uint32_t size = READ(instruction.m_size).unboxedUInt32();
+
+    if (!Wasm::arrayFill(instance, instruction.m_typeIndex, arrayref, offset, value, size))
+        WASM_THROW(Wasm::ExceptionType::OutOfBoundsArrayFill);
     WASM_END_IMPL();
 }
 
@@ -525,7 +545,7 @@ WASM_SLOW_PATH_DECL(struct_set)
     auto structReference = READ(instruction.m_structReference).encodedJSValue();
     if (JSValue::decode(structReference).isNull())
         WASM_THROW(Wasm::ExceptionType::NullStructSet);
-    auto value = READ(instruction.m_value).encodedJSValue();
+    auto value = static_cast<uint64_t>(READ(instruction.m_value).unboxedInt64());
     Wasm::structSet(structReference, instruction.m_fieldIndex, value);
     WASM_END();
 }
@@ -589,7 +609,7 @@ WASM_SLOW_PATH_DECL(grow_memory)
     WASM_RETURN(Wasm::growMemory(instance, delta));
 }
 
-inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionIndex)
+static inline UGPRPair doWasmCall(Wasm::Instance* instance, unsigned functionIndex)
 {
     uint32_t importFunctionCount = instance->module().moduleInformation().importFunctionCount();
 
@@ -614,7 +634,7 @@ WASM_SLOW_PATH_DECL(call)
     return doWasmCall(instance, instruction.m_functionIndex);
 }
 
-inline UGPRPair doWasmCallIndirect(CallFrame* callFrame, Wasm::Instance* instance, unsigned functionIndex, unsigned tableIndex, unsigned typeIndex)
+static inline UGPRPair doWasmCallIndirect(CallFrame* callFrame, Wasm::Instance* instance, unsigned functionIndex, unsigned tableIndex, unsigned typeIndex)
 {
     Wasm::FuncRefTable* table = instance->table(tableIndex)->asFuncrefTable();
 
@@ -627,6 +647,7 @@ inline UGPRPair doWasmCallIndirect(CallFrame* callFrame, Wasm::Instance* instanc
         WASM_THROW(Wasm::ExceptionType::NullTableEntry);
 
     const auto& callSignature = CALLEE()->signature(typeIndex);
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=260820
     if (callSignature.index() != function.m_function.typeIndex)
         WASM_THROW(Wasm::ExceptionType::BadSignature);
 
@@ -640,7 +661,7 @@ WASM_SLOW_PATH_DECL(call_indirect)
     return doWasmCallIndirect(callFrame, instance, functionIndex, instruction.m_tableIndex, instruction.m_typeIndex);
 }
 
-inline UGPRPair doWasmCallRef(CallFrame* callFrame, Wasm::Instance* callerInstance, JSValue targetReference, unsigned typeIndex)
+static inline UGPRPair doWasmCallRef(CallFrame* callFrame, Wasm::Instance* callerInstance, JSValue targetReference, unsigned typeIndex)
 {
     UNUSED_PARAM(callFrame);
     UNUSED_PARAM(callerInstance);
@@ -656,6 +677,7 @@ inline UGPRPair doWasmCallRef(CallFrame* callFrame, Wasm::Instance* callerInstan
     Wasm::WasmToWasmImportableFunction function = wasmFunction->importableFunction();
     Wasm::Instance* calleeInstance = &wasmFunction->instance()->instance();
 
+    // FIXME: https://bugs.webkit.org/show_bug.cgi?id=260820
     ASSERT(function.typeIndex == CALLEE()->signature(typeIndex).index());
     UNUSED_PARAM(typeIndex);
     WASM_CALL_RETURN(calleeInstance, function.entrypointLoadLocation->taggedPtr(), WasmEntryPtrTag);
@@ -777,14 +799,18 @@ WASM_SLOW_PATH_DECL(call_builtin)
         auto reference = takeGPR().encodedJSValue();
         bool allowNull = static_cast<bool>(takeGPR().unboxedInt32());
         int32_t heapType = takeGPR().unboxedInt32();
+        bool shouldNegate = false;
+        if (builtin == Wasm::LLIntBuiltin::RefTest)
+            shouldNegate = takeGPR().unboxedInt32();
         Wasm::TypeIndex typeIndex;
         if (Wasm::typeIndexIsType(static_cast<Wasm::TypeIndex>(heapType)))
             typeIndex = static_cast<Wasm::TypeIndex>(heapType);
         else
             typeIndex = instance->module().moduleInformation().typeSignatures[heapType]->index();
-        if (builtin == Wasm::LLIntBuiltin::RefTest)
-            gprStart[0] = static_cast<uint32_t>(Wasm::refCast(reference, allowNull, typeIndex));
-        else {
+        if (builtin == Wasm::LLIntBuiltin::RefTest) {
+            bool result = Wasm::refCast(reference, allowNull, typeIndex);
+            gprStart[0] = static_cast<uint32_t>((!shouldNegate || !result) && (shouldNegate || result));
+        } else {
             if (!Wasm::refCast(reference, allowNull, typeIndex))
                 WASM_THROW(Wasm::ExceptionType::CastFailure);
             gprStart[0] = reference;
@@ -820,6 +846,52 @@ WASM_SLOW_PATH_DECL(call_builtin)
     case Wasm::LLIntBuiltin::AnyConvertExtern: {
         auto reference = takeGPR().encodedJSValue();
         gprStart[0] = Wasm::externInternalize(reference);
+        WASM_END();
+    }
+    case Wasm::LLIntBuiltin::ArrayCopy: {
+        takeGPR().unboxedUInt32();
+        EncodedJSValue dst = takeGPR().encodedJSValue();
+        uint32_t dstOffset = takeGPR().unboxedUInt32();
+        takeGPR().unboxedUInt32();
+        EncodedJSValue src = takeGPR().encodedJSValue();
+        uint32_t srcOffset = takeGPR().unboxedUInt32();
+        uint32_t size = takeGPR().unboxedUInt32();
+
+        if (JSValue::decode(dst).isNull() || JSValue::decode(src).isNull())
+            WASM_THROW(Wasm::ExceptionType::NullArrayCopy);
+
+        if (!Wasm::arrayCopy(instance, dst, dstOffset, src, srcOffset, size))
+            WASM_THROW(Wasm::ExceptionType::OutOfBoundsArrayCopy);
+        WASM_END();
+    }
+    case Wasm::LLIntBuiltin::ArrayInitElem: {
+        takeGPR().unboxedUInt32();
+        EncodedJSValue dst = takeGPR().encodedJSValue();
+        uint32_t dstOffset = takeGPR().unboxedUInt32();
+        uint32_t srcElementIndex = takeGPR().unboxedUInt32();
+        uint32_t srcOffset = takeGPR().unboxedUInt32();
+        uint32_t size = takeGPR().unboxedUInt32();
+
+        if (JSValue::decode(dst).isNull())
+            WASM_THROW(Wasm::ExceptionType::NullArrayInitElem);
+
+        if (!Wasm::arrayInitElem(instance, dst, dstOffset, srcElementIndex, srcOffset, size))
+            WASM_THROW(Wasm::ExceptionType::OutOfBoundsArrayInitElem);
+        WASM_END();
+    }
+    case Wasm::LLIntBuiltin::ArrayInitData: {
+        takeGPR().unboxedUInt32();
+        EncodedJSValue dst = takeGPR().encodedJSValue();
+        uint32_t dstOffset = takeGPR().unboxedUInt32();
+        uint32_t srcDataIndex = takeGPR().unboxedUInt32();
+        uint32_t srcOffset = takeGPR().unboxedUInt32();
+        uint32_t size = takeGPR().unboxedUInt32();
+
+        if (JSValue::decode(dst).isNull())
+            WASM_THROW(Wasm::ExceptionType::NullArrayInitData);
+
+        if (!Wasm::arrayInitData(instance, dst, dstOffset, srcDataIndex, srcOffset, size))
+            WASM_THROW(Wasm::ExceptionType::OutOfBoundsArrayInitData);
         WASM_END();
     }
     default:

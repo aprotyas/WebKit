@@ -1889,7 +1889,7 @@ Color CaretBase::computeCaretColor(const RenderStyle& elementStyle, const Node* 
     // On iOS, we want to fall back to the tintColor, and only override if CSS has explicitly specified a custom color.
 #if PLATFORM(IOS_FAMILY) && !PLATFORM(MACCATALYST)
     UNUSED_PARAM(node);
-    if (elementStyle.hasAutoCaretColor() && !elementStyle.hasExplicitlySetColor())
+    if (elementStyle.hasAutoCaretColor())
         return { };
     return elementStyle.colorResolvingCurrentColor(elementStyle.caretColor());
 #elif HAVE(REDESIGNED_TEXT_CURSOR)
@@ -2199,9 +2199,9 @@ static Vector<Style::PseudoClassChangeInvalidation> invalidateFocusedElementAndS
 {
     Vector<Style::PseudoClassChangeInvalidation> invalidations;
     for (RefPtr element = focusedElement; element; element = element->shadowHost()) {
-        invalidations.append({ *element, { { CSSSelector::PseudoClassType::Focus, activeAndFocused }, { CSSSelector::PseudoClassType::FocusVisible, activeAndFocused } } });
+        invalidations.append({ *element, { { CSSSelector::PseudoClass::Focus, activeAndFocused }, { CSSSelector::PseudoClass::FocusVisible, activeAndFocused } } });
         for (auto& lineage : lineageOfType<Element>(*element))
-            invalidations.append({ lineage, CSSSelector::PseudoClassType::FocusWithin, activeAndFocused });
+            invalidations.append({ lineage, CSSSelector::PseudoClass::FocusWithin, activeAndFocused });
     }
     return invalidations;
 }
@@ -2893,12 +2893,12 @@ void FrameSelection::setCaretColor(const Color& caretColor)
 
 #endif // PLATFORM(IOS_FAMILY)
 
-static bool containsEndpoints(const CheckedPtr<Document>& document, const std::optional<SimpleRange>& range)
+static bool containsEndpoints(const WeakPtr<Document, WeakPtrImplWithEventTargetData>& document, const std::optional<SimpleRange>& range)
 {
     return document && range && document->contains(range->start.container) && document->contains(range->end.container);
 }
 
-static bool containsEndpoints(const CheckedPtr<Document>& document, const Range& liveRange)
+static bool containsEndpoints(const WeakPtr<Document, WeakPtrImplWithEventTargetData>& document, const Range& liveRange)
 {
     // Only need to check the start container because live ranges enforce the invariant that start and end have a common ancestor.
     return document && document->contains(liveRange.startContainer());

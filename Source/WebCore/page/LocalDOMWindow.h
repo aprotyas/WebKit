@@ -27,7 +27,7 @@
 #pragma once
 
 #include "Base64Utilities.h"
-#include "ContextDestructionObserver.h"
+#include "ContextDestructionObserverInlines.h"
 #include "DOMWindow.h"
 #include "ExceptionOr.h"
 #include "ImageBitmap.h"
@@ -179,6 +179,8 @@ public:
     WEBCORE_EXPORT bool hasTransientActivation() const;
     bool hasStickyActivation() const;
     WEBCORE_EXPORT bool consumeTransientActivation();
+    WEBCORE_EXPORT bool hasHistoryActionActivation() const;
+    WEBCORE_EXPORT bool consumeHistoryActionUserActivation();
 
     DOMSelection* getSelection();
 
@@ -269,7 +271,7 @@ public:
     {
         return postMessage(globalObject, incumbentWindow, message, WindowPostMessageOptions { WTFMove(targetOrigin), WTFMove(transfer) });
     }
-    WEBCORE_EXPORT void postMessageFromRemoteFrame(JSC::JSGlobalObject&, std::optional<WebCore::SecurityOriginData> target, const WebCore::MessageWithMessagePorts&);
+    WEBCORE_EXPORT void postMessageFromRemoteFrame(JSC::JSGlobalObject&, RefPtr<WindowProxy>&& source, const String& sourceOrigin, std::optional<WebCore::SecurityOriginData>&& targetOrigin, const WebCore::MessageWithMessagePorts&);
 
     void languagesChanged();
 
@@ -278,11 +280,11 @@ public:
     void scrollTo(const ScrollToOptions&, ScrollClamping = ScrollClamping::Clamped, ScrollSnapPointSelectionMethod = ScrollSnapPointSelectionMethod::Closest, std::optional<FloatSize> originalScrollDelta = std::nullopt) const;
     void scrollTo(double x, double y, ScrollClamping = ScrollClamping::Clamped) const;
 
-    void moveBy(float x, float y) const;
-    void moveTo(float x, float y) const;
+    void moveBy(int x, int y) const;
+    void moveTo(int x, int y) const;
 
-    void resizeBy(float x, float y) const;
-    void resizeTo(float width, float height) const;
+    void resizeBy(int x, int y) const;
+    void resizeTo(int width, int height) const;
 
     VisualViewport& visualViewport();
 
@@ -409,7 +411,7 @@ public:
     bool mayReuseForNavigation() const { return m_mayReuseForNavigation; }
 
     Page* page() const;
-    CheckedPtr<Page> checkedPage() const;
+    RefPtr<Page> protectedPage() const;
 
     WEBCORE_EXPORT static void forEachWindowInterestedInStorageEvents(const Function<void(LocalDOMWindow&)>&);
 
@@ -443,7 +445,7 @@ private:
     void decrementGamepadEventListenerCount();
 #endif
 
-    void processPostMessage(JSC::JSGlobalObject&, RefPtr<Document>&&, const MessageWithMessagePorts&, RefPtr<WindowProxy>&&, RefPtr<SecurityOrigin>&&);
+    void processPostMessage(JSC::JSGlobalObject&, const String& origin, const MessageWithMessagePorts&, RefPtr<WindowProxy>&&, RefPtr<SecurityOrigin>&&);
     bool m_shouldPrintWhenFinishedLoading { false };
     bool m_suspendedForDocumentSuspension { false };
     bool m_isSuspendingObservers { false };
@@ -495,6 +497,7 @@ private:
     // been activated, while negative infinity indicates that a user activation-gated API has consumed the last user activation of W. The initial
     // value is positive infinity.
     MonotonicTime m_lastActivationTimestamp { MonotonicTime::infinity() };
+    MonotonicTime m_lastHistoryActionActivationTimestamp { MonotonicTime::infinity() };
 
     bool m_wasWrappedWithoutInitializedSecurityOrigin { false };
     bool m_mayReuseForNavigation { true };

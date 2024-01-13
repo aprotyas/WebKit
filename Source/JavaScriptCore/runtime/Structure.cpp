@@ -192,12 +192,14 @@ Structure::Structure(VM& vm, JSGlobalObject* globalObject, JSValue prototype, co
     , m_classInfo(classInfo)
     , m_transitionWatchpointSet(IsWatched)
 {
+    bool hasStaticNonEnumerableProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::DontEnum));
     bool hasStaticNonConfigurableProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::DontDelete));
 
     setDictionaryKind(NoneDictionaryKind);
     setIsPinnedPropertyTable(false);
     setHasAnyKindOfGetterSetterProperties(classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::AccessorOrCustomAccessorOrValue)));
     setHasReadOnlyOrGetterSetterPropertiesExcludingProto(hasAnyKindOfGetterSetterProperties() || classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::ReadOnly)));
+    setHasNonEnumerableProperties(hasStaticNonEnumerableProperty || typeInfo.overridesGetOwnPropertySlot());
     setHasNonConfigurableProperties(hasStaticNonConfigurableProperty || typeInfo.overridesGetOwnPropertySlot());
     setHasNonConfigurableReadOnlyOrGetterSetterProperties(hasStaticNonConfigurableProperty || (typeInfo.overridesGetOwnPropertySlot() && typeInfo.type() != ArrayType));
     setHasUnderscoreProtoPropertyExcludingOriginalProto(false);
@@ -239,12 +241,14 @@ Structure::Structure(VM& vm, CreatingEarlyCellTag)
     , m_transitionWatchpointSet(IsWatched)
 {
     TypeInfo typeInfo { StructureType, StructureFlags };
+    bool hasStaticNonEnumerableProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::DontEnum));
     bool hasStaticNonConfigurableProperty = m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::DontDelete));
 
     setDictionaryKind(NoneDictionaryKind);
     setIsPinnedPropertyTable(false);
     setHasAnyKindOfGetterSetterProperties(m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::AccessorOrCustomAccessorOrValue)));
     setHasReadOnlyOrGetterSetterPropertiesExcludingProto(hasAnyKindOfGetterSetterProperties() || m_classInfo->hasStaticPropertyWithAnyOfAttributes(static_cast<uint8_t>(PropertyAttribute::ReadOnly)));
+    setHasNonEnumerableProperties(hasStaticNonEnumerableProperty || typeInfo.overridesGetOwnPropertySlot());
     setHasNonConfigurableProperties(hasStaticNonConfigurableProperty || typeInfo.overridesGetOwnPropertySlot());
     setHasNonConfigurableReadOnlyOrGetterSetterProperties(hasStaticNonConfigurableProperty || (typeInfo.overridesGetOwnPropertySlot() && typeInfo.type() != ArrayType));
     setHasUnderscoreProtoPropertyExcludingOriginalProto(false);
@@ -288,6 +292,7 @@ Structure::Structure(VM& vm, Structure* previous)
     setHasBeenFlattenedBefore(previous->hasBeenFlattenedBefore());
     setHasAnyKindOfGetterSetterProperties(previous->hasAnyKindOfGetterSetterProperties());
     setHasReadOnlyOrGetterSetterPropertiesExcludingProto(previous->hasReadOnlyOrGetterSetterPropertiesExcludingProto());
+    setHasNonEnumerableProperties(previous->hasNonEnumerableProperties());
     setHasNonConfigurableProperties(previous->hasNonConfigurableProperties());
     setHasNonConfigurableReadOnlyOrGetterSetterProperties(previous->hasNonConfigurableReadOnlyOrGetterSetterProperties());
     setHasUnderscoreProtoPropertyExcludingOriginalProto(previous->hasUnderscoreProtoPropertyExcludingOriginalProto());
@@ -830,6 +835,7 @@ Structure* Structure::nonPropertyTransitionSlow(VM& vm, Structure* structure, Tr
     transition->m_blob.setIndexingModeIncludingHistory(indexingModeIncludingHistory);
 
     if (changesIndexingType(transitionKind) && hasAnyArrayStorage(indexingModeIncludingHistory)) {
+        transition->setHasNonEnumerableProperties(true);
         transition->setHasNonConfigurableProperties(true);
         transition->setHasNonConfigurableReadOnlyOrGetterSetterProperties(true);
     }
@@ -840,8 +846,7 @@ Structure* Structure::nonPropertyTransitionSlow(VM& vm, Structure* structure, Tr
     if (transitionKind == TransitionKind::BecomePrototype)
         transition->setMayBePrototype(true);
     
-    if (setsDontDeleteOnAllProperties(transitionKind)
-        || setsReadOnlyOnNonAccessorProperties(transitionKind)) {
+    if (setsDontDeleteOnAllProperties(transitionKind) || setsReadOnlyOnNonAccessorProperties(transitionKind)) {
         // We pin the property table on transitions that do wholesale editing of the property
         // table, since our logic for walking the property transition chain to rematerialize the
         // table doesn't know how to take into account such wholesale edits.
@@ -859,6 +864,7 @@ Structure* Structure::nonPropertyTransitionSlow(VM& vm, Structure* structure, Tr
         else
             table->freeze();
 
+        transition->setHasNonEnumerableProperties(true);
         transition->setHasNonConfigurableProperties(true);
         transition->setHasNonConfigurableReadOnlyOrGetterSetterProperties(true);
     } else {
@@ -913,17 +919,31 @@ Structure* Structure::flattenDictionaryStructure(VM& vm, JSObject* object)
     checkOffsetConsistency();
     ASSERT(isDictionary());
     ASSERT(object->structure() == this);
-    
+
+    Locker<JSCellLock> cellLocker(NoLockingNecessary);
+
+    PropertyTable* table = nullptr;
+    size_t beforeOutOfLineCapacity = this->outOfLineCapacity();
+    size_t afterOutOfLineCapacity = beforeOutOfLineCapacity;
+    if (isUncacheableDictionary()) {
+        table = propertyTableOrNull();
+        ASSERT(table);
+        PropertyOffset maxOffset = invalidOffset;
+        if (unsigned propertyCount = table->size())
+            maxOffset = offsetForPropertyNumber(propertyCount - 1, m_inlineCapacity);
+        afterOutOfLineCapacity = outOfLineCapacity(maxOffset);
+    }
+
+    // This is the only case we shrink butterfly in this function. We should take a cell lock to protect against concurrent access to the butterfly.
+    if (beforeOutOfLineCapacity != afterOutOfLineCapacity)
+        cellLocker = Locker { object->cellLock() };
+
     GCSafeConcurrentJSLocker locker(m_lock, vm);
-    
+
     object->setStructureIDDirectly(id().nuke());
     WTF::storeStoreFence();
 
-    size_t beforeOutOfLineCapacity = this->outOfLineCapacity();
     if (isUncacheableDictionary()) {
-        PropertyTable* table = propertyTableOrNull();
-        ASSERT(table);
-
         size_t propertyCount = table->size();
 
         // Holds our values compacted by insertion order. This is OK since GC is deferred.
@@ -955,7 +975,7 @@ Structure* Structure::flattenDictionaryStructure(VM& vm, JSObject* object)
     setDictionaryKind(NoneDictionaryKind);
     setHasBeenFlattenedBefore(true);
 
-    size_t afterOutOfLineCapacity = this->outOfLineCapacity();
+    ASSERT(this->outOfLineCapacity() == afterOutOfLineCapacity);
 
     if (object->butterfly() && beforeOutOfLineCapacity != afterOutOfLineCapacity) {
         ASSERT(beforeOutOfLineCapacity > afterOutOfLineCapacity);

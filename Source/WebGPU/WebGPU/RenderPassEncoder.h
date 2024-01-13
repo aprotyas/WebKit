@@ -28,9 +28,13 @@
 #import "CommandsMixin.h"
 #import <wtf/FastMalloc.h>
 #import <wtf/HashMap.h>
+#import <wtf/HashSet.h>
+#import <wtf/HashTraits.h>
 #import <wtf/Ref.h>
 #import <wtf/RefCounted.h>
 #import <wtf/Vector.h>
+
+@class TextureAndClearColor;
 
 struct WGPURenderPassEncoderImpl {
 };
@@ -49,13 +53,13 @@ class RenderPipeline;
 class RenderPassEncoder : public WGPURenderPassEncoderImpl, public RefCounted<RenderPassEncoder>, public CommandsMixin {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    static Ref<RenderPassEncoder> create(id<MTLRenderCommandEncoder> renderCommandEncoder, const WGPURenderPassDescriptor& descriptor, NSUInteger visibilityResultBufferSize, bool depthReadOnly, bool stencilReadOnly, CommandEncoder& parentEncoder, Device& device)
+    static Ref<RenderPassEncoder> create(id<MTLRenderCommandEncoder> renderCommandEncoder, const WGPURenderPassDescriptor& descriptor, NSUInteger visibilityResultBufferSize, bool depthReadOnly, bool stencilReadOnly, CommandEncoder& parentEncoder, id<MTLBuffer> visibilityResultBuffer, MTLRenderPassDescriptor* renderPassDescriptor, Device& device)
     {
-        return adoptRef(*new RenderPassEncoder(renderCommandEncoder, descriptor, visibilityResultBufferSize, depthReadOnly, stencilReadOnly, parentEncoder, device));
+        return adoptRef(*new RenderPassEncoder(renderCommandEncoder, descriptor, visibilityResultBufferSize, depthReadOnly, stencilReadOnly, parentEncoder, visibilityResultBuffer, renderPassDescriptor, device));
     }
-    static Ref<RenderPassEncoder> createInvalid(Device& device)
+    static Ref<RenderPassEncoder> createInvalid(CommandEncoder& parentEncoder, Device& device)
     {
-        return adoptRef(*new RenderPassEncoder(device));
+        return adoptRef(*new RenderPassEncoder(parentEncoder, device));
     }
 
     ~RenderPassEncoder();
@@ -86,8 +90,8 @@ public:
     bool isValid() const { return m_renderCommandEncoder; }
 
 private:
-    RenderPassEncoder(id<MTLRenderCommandEncoder>, const WGPURenderPassDescriptor&, NSUInteger, bool depthReadOnly, bool stencilReadOnly, CommandEncoder&, Device&);
-    RenderPassEncoder(Device&);
+    RenderPassEncoder(id<MTLRenderCommandEncoder>, const WGPURenderPassDescriptor&, NSUInteger, bool depthReadOnly, bool stencilReadOnly, CommandEncoder&, id<MTLBuffer>, MTLRenderPassDescriptor*, Device&);
+    RenderPassEncoder(CommandEncoder&, Device&);
 
     bool validatePopDebugGroup() const;
 
@@ -115,10 +119,23 @@ private:
     Vector<uint32_t> m_vertexDynamicOffsets;
     Vector<uint32_t> m_fragmentDynamicOffsets;
     const RenderPipeline* m_pipeline { nullptr };
-    RefPtr<CommandEncoder> m_parentEncoder;
+    Ref<CommandEncoder> m_parentEncoder;
     HashMap<uint32_t, Vector<uint32_t>, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_bindGroupDynamicOffsets;
     float m_minDepth { 0.f };
     float m_maxDepth { 1.f };
+    HashSet<uint64_t, DefaultHash<uint32_t>, WTF::UnsignedWithZeroKeyHashTraits<uint32_t>> m_queryBufferIndicesToClear;
+    id<MTLBuffer> m_visibilityResultBuffer { nil };
+    uint32_t m_renderTargetWidth { 0 };
+    uint32_t m_renderTargetHeight { 0 };
+    NSMutableDictionary<NSNumber*, TextureAndClearColor*> *m_attachmentsToClear { nil };
+    NSMutableDictionary<NSNumber*, TextureAndClearColor*> *m_allColorAttachments { nil };
+    id<MTLTexture> m_depthStencilAttachmentToClear { nil };
+    MTLRenderPassDescriptor* m_renderPassDescriptor { nil };
+    float m_depthClearValue { 0 };
+    uint32_t m_stencilClearValue { 0 };
+    bool m_clearDepthAttachment { false };
+    bool m_clearStencilAttachment { false };
+    bool m_issuedDrawCall { false };
 };
 
 } // namespace WebGPU

@@ -106,6 +106,10 @@ public:
     
     virtual void setSafeAreaInsets(double, double, double, double) { notImplemented(); }
 
+    virtual void beginInteractiveObscuredInsetsChange() { notImplemented(); }
+    virtual void endInteractiveObscuredInsetsChange() { notImplemented(); }
+    virtual void setObscuredInsets(double, double, double, double) { notImplemented(); }
+
     // View Parenting and Visibility
 
     virtual void becomeFirstResponder() { notImplemented(); }
@@ -113,6 +117,7 @@ public:
 
     virtual void copyText(JSStringRef) { notImplemented(); }
     virtual void paste() { notImplemented(); }
+    virtual int64_t pasteboardChangeCount() const { return 0; }
 
     virtual void chooseMenuAction(JSStringRef, JSValueRef);
     virtual void dismissMenu();
@@ -122,8 +127,13 @@ public:
     virtual bool isWindowContentViewFirstResponder() const { notImplemented(); return false; }
     virtual bool isWebContentFirstResponder() const { notImplemented(); return false; }
 
+    virtual void setInlinePrediction(JSStringRef) { notImplemented(); }
+    virtual void acceptInlinePrediction() { notImplemented(); }
+
     virtual void removeViewFromWindow(JSValueRef) { notImplemented(); }
     virtual void addViewToWindow(JSValueRef) { notImplemented(); }
+
+    virtual void resizeWindowTo(unsigned /* width */, unsigned /* height */) { notImplemented(); }
 
     virtual void installTapGestureOnWindow(JSValueRef) { notImplemented(); }
 
@@ -211,6 +221,8 @@ public:
     }
 
     virtual void setWebViewEditable(bool) { }
+
+    virtual void setWebViewAllowsMagnification(bool) { }
 
     virtual void rawKeyDown(JSStringRef) { notImplemented(); }
     virtual void rawKeyUp(JSStringRef) { notImplemented(); }
@@ -303,6 +315,7 @@ public:
     virtual bool isShowingMenu() const { notImplemented(); return false; }
     virtual JSObjectRef rectForMenuAction(JSStringRef) const { notImplemented(); return nullptr; }
     virtual JSObjectRef menuRect() const { notImplemented(); return nullptr; }
+    virtual JSObjectRef contextMenuPreviewRect() const { notImplemented(); return nullptr; }
     virtual JSObjectRef contextMenuRect() const { notImplemented(); return nullptr; }
     virtual bool isShowingContextMenu() const { notImplemented(); return false; }
 
@@ -391,6 +404,7 @@ public:
     // Image Analysis
 
     virtual uint64_t currentImageAnalysisRequestID() const { return 0; }
+    virtual void installFakeMachineReadableCodeResultsForImageAnalysis() { }
 
 protected:
     explicit UIScriptController(UIScriptContext&);

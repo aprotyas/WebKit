@@ -108,11 +108,11 @@ inline static std::optional<ShareableBitmap::Handle> createShareableBitmapFromNa
 #endif
 
     // If we failed to create ShareableBitmap or PlatformImage, fall back to image-draw method.
-    if (!platformImage)
+    if (!platformImage) {
         bitmap = ShareableBitmap::createFromImageDraw(image);
-
-    if (!platformImage && bitmap)
-        platformImage = bitmap->createPlatformImage(DontCopyBackingStore, ShouldInterpolate::Yes);
+        if (bitmap)
+            platformImage = bitmap->createPlatformImage(DontCopyBackingStore, ShouldInterpolate::Yes);
+    }
 
     if (!platformImage)
         return std::nullopt;
@@ -124,7 +124,7 @@ inline static std::optional<ShareableBitmap::Handle> createShareableBitmapFromNa
     handle->takeOwnershipOfMemory(MemoryLedger::Graphics);
 
     // Replace the PlatformImage of the input NativeImage with the shared one.
-    image.setPlatformImage(WTFMove(platformImage));
+    image.replaceContents(WTFMove(platformImage));
     return handle;
 }
 
@@ -229,8 +229,10 @@ void RemoteResourceCacheProxy::releaseRenderingResource(RenderingResourceIdentif
 
 void RemoteResourceCacheProxy::clearRenderingResourceMap()
 {
-    for (auto& renderingResource : m_renderingResources.values())
-        renderingResource.get()->removeObserver(*this);
+    for (auto& weakRenderingResource : m_renderingResources.values()) {
+        if (RefPtr renderingResource = weakRenderingResource.get())
+            renderingResource->removeObserver(*this);
+    }
     m_renderingResources.clear();
 }
 

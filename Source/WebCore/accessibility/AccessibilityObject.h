@@ -30,6 +30,7 @@
 #pragma once
 
 #include "AXCoreObject.h"
+#include "AXTextRun.h"
 #include "CharacterRange.h"
 #include "FloatQuad.h"
 #include "LayoutRect.h"
@@ -57,22 +58,13 @@ class IntPoint;
 class IntSize;
 class ScrollableArea;
 
-struct AccessibilityText {
-    String text;
-    AccessibilityTextSource textSource;
-    
-    AccessibilityText(const String& t, const AccessibilityTextSource& s)
-        : text(t)
-        , textSource(s)
-    { }
-};
-
 bool nodeHasPresentationRole(Node*);
 
-class AccessibilityObject : public AXCoreObject, public CanMakeWeakPtr<AccessibilityObject>, public CanMakeCheckedPtr {
+class AccessibilityObject : public AXCoreObject, public CanMakeWeakPtr<AccessibilityObject> {
 public:
     virtual ~AccessibilityObject();
 
+    AXID treeID() const final;
     ProcessID processID() const override;
     String dbg() const final;
 
@@ -103,6 +95,7 @@ public:
     bool isInDescriptionListDetail() const override;
     bool isInDescriptionListTerm() const override;
     bool isInCell() const override;
+    bool isInRow() const;
 
     bool isDetached() const override;
 
@@ -116,6 +109,7 @@ public:
     bool isAccessibilityARIAGridInstance() const override { return false; }
     bool isAccessibilityARIAGridRowInstance() const override { return false; }
     bool isAccessibilityARIAGridCellInstance() const override { return false; }
+    virtual bool isAccessibilityLabelInstance() const { return false; }
     virtual bool isAccessibilityListBoxInstance() const { return false; }
     bool isAXIsolatedObjectInstance() const override { return false; }
 
@@ -128,11 +122,11 @@ public:
     bool isListBoxOption() const override { return false; }
     bool isAttachment() const override { return false; }
     bool isMediaTimeline() const { return false; }
-    bool isFileUploadButton() const;
+    bool isFileUploadButton() const final;
     bool isInputImage() const override { return false; }
     virtual bool isSliderThumb() const { return false; }
     bool isControl() const override { return false; }
-    virtual bool isLabel() const { return false; }
+    bool isLabel() const { return isAccessibilityLabelInstance() || labelForObjects().size(); }
 
     bool isList() const override { return false; }
     virtual bool isUnorderedList() const { return false; }
@@ -176,6 +170,7 @@ public:
     // Table row support.
     bool isTableRow() const override { return false; }
     unsigned rowIndex() const override { return 0; }
+    bool ignoredByRowAncestor() const;
 
     // ARIA tree/grid row support.
     bool isARIATreeGridRow() const override { return false; }
@@ -197,7 +192,7 @@ public:
     bool isARIATextControl() const;
     bool isNonNativeTextControl() const override;
     bool isRangeControl() const;
-    bool isMeter() const;
+    bool isMeter() const final;
     bool isStyleFormatGroup() const;
     bool isFigureElement() const;
     bool isKeyboardFocusable() const override;
@@ -354,9 +349,7 @@ public:
 
     virtual AccessibilityObject* observableObject() const { return nullptr; }
     AccessibilityChildrenVector linkedObjects() const override { return { }; }
-    AccessibilityObject* titleUIElement() const override { return nullptr; }
-    AccessibilityObject* correspondingLabelForControlElement() const override { return nullptr; }
-    AccessibilityObject* correspondingControlForLabelElement() const override { return nullptr; }
+    virtual AccessibilityObject* controlForLabelElement() const { return nullptr; }
     AccessibilityObject* scrollBar(AccessibilityOrientation) override { return nullptr; }
 
     virtual AccessibilityRole ariaRoleAttribute() const { return AccessibilityRole::Unknown; }
@@ -390,6 +383,9 @@ public:
     String textUnderElement(AccessibilityTextUnderElementMode = AccessibilityTextUnderElementMode()) const override { return { }; }
     String text() const override { return { }; }
     unsigned textLength() const final;
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    virtual AXTextRuns textRuns() { return { }; }
+#endif
 #if PLATFORM(COCOA)
     // Returns an array of strings and AXObject wrappers corresponding to the
     // textruns and replacement nodes included in the given range.
@@ -729,11 +725,8 @@ public:
 #if PLATFORM(COCOA)
     bool preventKeyboardDOMEventDispatch() const override;
     void setPreventKeyboardDOMEventDispatch(bool) override;
-    bool fileUploadButtonReturnsValueInTitle() const;
+    bool fileUploadButtonReturnsValueInTitle() const override;
     String speechHintAttributeValue() const override;
-    String descriptionAttributeValue() const override;
-    String helpTextAttributeValue() const override;
-    String titleAttributeValue() const override;
     bool hasApplePDFAnnotationAttribute() const override { return hasAttribute(HTMLNames::x_apple_pdf_annotationAttr); }
 #endif
 

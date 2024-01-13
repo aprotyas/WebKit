@@ -26,8 +26,6 @@
 #include "config.h"
 #include "SWServerWorker.h"
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "Logging.h"
 #include "SWServer.h"
 #include "SWServerRegistration.h"
@@ -38,9 +36,9 @@
 
 namespace WebCore {
 
-HashMap<ServiceWorkerIdentifier, SWServerWorker*>& SWServerWorker::allWorkers()
+HashMap<ServiceWorkerIdentifier, WeakRef<SWServerWorker>>& SWServerWorker::allWorkers()
 {
-    static NeverDestroyed<HashMap<ServiceWorkerIdentifier, SWServerWorker*>> workers;
+    static NeverDestroyed<HashMap<ServiceWorkerIdentifier, WeakRef<SWServerWorker>>> workers;
     return workers;
 }
 
@@ -68,7 +66,7 @@ SWServerWorker::SWServerWorker(SWServer& server, SWServerRegistration& registrat
 {
     m_data.scriptURL.removeFragmentIdentifier();
 
-    auto result = allWorkers().add(identifier, this);
+    auto result = allWorkers().add(identifier, *this);
     ASSERT_UNUSED(result, result.isNewEntry);
 
     ASSERT(m_server->getRegistration(m_registrationKey) == &registration);
@@ -462,5 +460,3 @@ bool SWServerWorker::matchingImportedScripts(const Vector<std::pair<URL, ScriptB
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

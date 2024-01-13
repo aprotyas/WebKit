@@ -87,6 +87,7 @@ enum class WebKit::SwapBuffersDisplayRequirement : uint8_t {
 [LegacyPopulateFromEmptyConstructor] class WebKit::RemoteLayerTreeTransaction {
 {
     WebCore::PlatformLayerIdentifier m_rootLayerID;
+    WebCore::ProcessIdentifier m_processIdentifier;
     WebKit::ChangedLayers m_changedLayers;
 
     Markable<WebCore::LayerHostingContextIdentifier> m_remoteContextHostedIdentifier;
@@ -132,6 +133,10 @@ enum class WebKit::SwapBuffersDisplayRequirement : uint8_t {
     std::optional<WebKit::EditorState> m_editorState;
 #if PLATFORM(IOS_FAMILY)
     std::optional<uint64_t> m_dynamicViewportSizeUpdateID;
+#endif
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+    Seconds m_acceleratedTimelineTimeOrigin;
 #endif
 }
 

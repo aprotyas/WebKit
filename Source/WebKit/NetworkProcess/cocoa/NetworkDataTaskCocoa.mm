@@ -214,16 +214,15 @@ NetworkDataTaskCocoa::NetworkDataTaskCocoa(NetworkSession& session, NetworkDataT
     }
 
     bool shouldBlockCookies = false;
-#if ENABLE(TRACKING_PREVENTION)
     shouldBlockCookies = m_storedCredentialsPolicy == WebCore::StoredCredentialsPolicy::EphemeralStateless;
     if (auto* networkStorageSession = session.networkStorageSession()) {
         if (!shouldBlockCookies)
             shouldBlockCookies = networkStorageSession->shouldBlockCookies(request, frameID(), pageID(), shouldRelaxThirdPartyCookieBlocking());
     }
-#endif
     restrictRequestReferrerToOriginIfNeeded(request);
 
     RetainPtr<NSURLRequest> nsRequest = request.nsURLRequest(WebCore::HTTPBodyUpdatePolicy::UpdateHTTPBody);
+    ASSERT(nsRequest);
     RetainPtr<NSMutableURLRequest> mutableRequest = adoptNS([nsRequest.get() mutableCopy]);
 
     if (parameters.isMainFrameNavigation
@@ -303,7 +302,6 @@ NetworkDataTaskCocoa::NetworkDataTaskCocoa(NetworkSession& session, NetworkDataT
 #endif
     }
 
-#if ENABLE(TRACKING_PREVENTION)
     if (!isTopLevelNavigation())
         applyCookiePolicyForThirdPartyCloaking(request);
     if (shouldBlockCookies) {
@@ -315,7 +313,6 @@ NetworkDataTaskCocoa::NetworkDataTaskCocoa(NetworkSession& session, NetworkDataT
 #endif
         blockCookies();
     }
-#endif
 
     if (WebCore::ResourceRequest::resourcePrioritiesEnabled())
         m_task.get().priority = toNSURLSessionTaskPriority(request.priority());
@@ -458,6 +455,15 @@ void NetworkDataTaskCocoa::willPerformHTTPRedirection(WebCore::ResourceResponse&
 
     if (isTopLevelNavigation())
         request.setFirstPartyForCookies(request.url());
+    else {
+        WebCore::RegistrableDomain firstPartyDomain { request.firstPartyForCookies() };
+        if (auto* storageSession = m_session->networkStorageSession()) {
+            bool didPreviousRequestHaveStorageAccess = storageSession->hasStorageAccess(WebCore::RegistrableDomain { redirectResponse.url() }, firstPartyDomain, m_frameID, m_pageID);
+            bool doesRequestHaveStorageAccess = storageSession->hasStorageAccess(WebCore::RegistrableDomain { request.url() }, firstPartyDomain, m_frameID, m_pageID);
+            if (didPreviousRequestHaveStorageAccess && doesRequestHaveStorageAccess)
+                request.setFirstPartyForCookies(request.url());
+        }
+    }
 
     NetworkTaskCocoa::willPerformHTTPRedirection(WTFMove(redirectResponse), WTFMove(request), [completionHandler = WTFMove(completionHandler), this, weakThis = ThreadSafeWeakPtr { *this }, redirectResponse] (WebCore::ResourceRequest&& request) mutable {
         auto protectedThis = weakThis.get();

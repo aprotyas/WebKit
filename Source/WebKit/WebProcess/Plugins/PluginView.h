@@ -42,6 +42,7 @@ OBJC_CLASS PDFSelection;
 namespace WebCore {
 class HTMLPlugInElement;
 class LocalFrame;
+class RenderEmbeddedObject;
 }
 
 namespace WebKit {
@@ -77,10 +78,11 @@ public:
     WebCore::HTMLPlugInElement& pluginElement() const { return m_pluginElement; }
     const URL& mainResourceURL() const { return m_mainResourceURL; }
 
-    void setPageScaleFactor(double);
+    void didBeginMagnificationGesture();
+    void didEndMagnificationGesture();
+    void setPageScaleFactor(double, std::optional<WebCore::IntPoint> origin);
     double pageScaleFactor() const;
 
-    void pageScaleFactorDidChange();
     void topContentInsetDidChange();
 
     void webPageDestroyed();
@@ -113,6 +115,8 @@ private:
 
     void initializePlugin();
 
+    Ref<PDFPluginBase> protectedPlugin() const;
+
     void viewGeometryDidChange();
     void viewVisibilityDidChange();
 
@@ -128,6 +132,8 @@ private:
 
     void updateDocumentForPluginSizingBehavior();
 
+    CheckedPtr<WebCore::RenderEmbeddedObject> checkedRenderer() const;
+
     // WebCore::PluginViewBase
     WebCore::PluginLayerHostingStrategy layerHostingStrategy() const final;
 
@@ -141,6 +147,9 @@ private:
     bool wantsWheelEvents() final;
     bool shouldAllowNavigationFromDrags() const final;
     void willDetachRenderer() final;
+
+    bool usesAsyncScrolling() const final;
+    WebCore::ScrollingNodeID scrollingNodeID() const final;
 
     // WebCore::Widget
     void setFrameRect(const WebCore::IntRect&) final;

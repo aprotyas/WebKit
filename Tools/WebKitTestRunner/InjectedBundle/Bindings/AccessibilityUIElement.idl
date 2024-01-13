@@ -28,7 +28,6 @@
 ] interface AccessibilityUIElement {
     boolean isEqual(AccessibilityUIElement otherElement);
     readonly attribute DOMString domIdentifier;
-    readonly attribute boolean isIsolatedObject;
 
     // Element access.
     AccessibilityUIElement elementAtPoint(long x, long y);
@@ -60,6 +59,7 @@
     readonly attribute unsigned long numberOfCharacters;
     readonly attribute long insertionPointLineNumber;
     readonly attribute DOMString selectedTextRange;
+    readonly attribute DOMString intersectionWithSelectionRange;
     readonly attribute DOMString textInputMarkedRange;
 
     DOMString stringDescriptionOfAttributeValue(DOMString attr);
@@ -117,6 +117,7 @@
     readonly attribute boolean isDeletion;
     readonly attribute boolean isFirstItemInSuggestion;
     readonly attribute boolean isLastItemInSuggestion;
+    readonly attribute boolean isInNonNativeTextControl;
 
     readonly attribute long x;
     readonly attribute long y;
@@ -181,22 +182,23 @@
     readonly attribute DOMString customContent;
     object selectedCells();
 
-    object detailsElements();
-    object errorMessageElements();
-    AccessibilityUIElement ariaOwnsElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaOwnsReferencingElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaFlowToElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaFlowToReferencingElementAtIndex(unsigned long index);
+    // Relationships.
+    AccessibilityUIElement controllerElementAtIndex(unsigned long index);
     AccessibilityUIElement ariaControlsElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaControlsReferencingElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaLabelledByElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaLabelledByReferencingElementAtIndex(unsigned long index);
     AccessibilityUIElement ariaDescribedByElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaDescribedByReferencingElementAtIndex(unsigned long index);
+    AccessibilityUIElement descriptionForElementAtIndex(unsigned long index);
+    object detailsElements();
     AccessibilityUIElement ariaDetailsElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaDetailsReferencingElementAtIndex(unsigned long index);
+    AccessibilityUIElement detailsForElementAtIndex(unsigned long index);
+    object errorMessageElements();
     AccessibilityUIElement ariaErrorMessageElementAtIndex(unsigned long index);
-    AccessibilityUIElement ariaErrorMessageReferencingElementAtIndex(unsigned long index);
+    AccessibilityUIElement errorMessageForElementAtIndex(unsigned long index);
+    AccessibilityUIElement flowFromElementAtIndex(unsigned long index);
+    AccessibilityUIElement ariaFlowToElementAtIndex(unsigned long index);
+    AccessibilityUIElement ariaLabelledByElementAtIndex(unsigned long index);
+    AccessibilityUIElement labelForElementAtIndex(unsigned long index);
+    AccessibilityUIElement ownerElementAtIndex(unsigned long index);
+    AccessibilityUIElement ariaOwnsElementAtIndex(unsigned long index);
 
     // Paramaterized attributes.
     DOMString parameterizedAttributeNames();

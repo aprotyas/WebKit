@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2007-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2007-2024 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Cameron Zwarich (cwzwarich@uwaterloo.ca)
  *
  * Redistribution and use in source and binary forms, with or without
@@ -391,7 +391,7 @@ JSC_DEFINE_HOST_FUNCTION(assertCall, (JSGlobalObject* globalObject, CallFrame* c
 
     bool iteratedOnce = false;
     CodeBlock* codeBlock = nullptr;
-    unsigned line;
+    LineColumn lineColumn;
     StackVisitor::visit(callFrame, globalObject->vm(), [&] (StackVisitor& visitor) {
         if (!iteratedOnce) {
             iteratedOnce = true;
@@ -399,13 +399,12 @@ JSC_DEFINE_HOST_FUNCTION(assertCall, (JSGlobalObject* globalObject, CallFrame* c
         }
 
         RELEASE_ASSERT(visitor->hasLineAndColumnInfo());
-        unsigned column;
-        visitor->computeLineAndColumn(line, column);
+        lineColumn = visitor->computeLineAndColumn();
         codeBlock = visitor->codeBlock();
         return IterationStatus::Done;
     });
     RELEASE_ASSERT(!!codeBlock);
-    RELEASE_ASSERT_WITH_MESSAGE(false, "JS assertion failed at line %u in:\n%s\n", line, codeBlock->sourceCodeForTools().data());
+    RELEASE_ASSERT_WITH_MESSAGE(false, "JS assertion failed at line %u in:\n%s\n", lineColumn.line, codeBlock->sourceCodeForTools().data());
     return JSValue::encode(jsUndefined());
 }
 #endif // ASSERT_ENABLED
@@ -522,6 +521,8 @@ static String asSignpostString(JSGlobalObject* globalObject, JSValue v)
     return v.toWTFString(globalObject);
 }
 
+std::atomic<unsigned> activeJSGlobalObjectSignpostIntervalCount { 0 };
+
 JSC_DEFINE_HOST_FUNCTION(signpostStart, (JSGlobalObject* globalObject, CallFrame* callFrame))
 {
     VM& vm = globalObject->vm();
@@ -530,6 +531,7 @@ JSC_DEFINE_HOST_FUNCTION(signpostStart, (JSGlobalObject* globalObject, CallFrame
     auto message = asSignpostString(globalObject, callFrame->argument(0));
     RETURN_IF_EXCEPTION(scope, EncodedJSValue());
 
+    ++activeJSGlobalObjectSignpostIntervalCount;
     os_signpost_interval_begin(WTFSignpostLogHandle(), os_signpost_id_make_with_pointer(WTFSignpostLogHandle(), globalObject), "JSGlobalObject signpost", "%" PUBLIC_LOG_STRING, message.ascii().data());
 
     return JSValue::encode(jsUndefined());
@@ -544,6 +546,7 @@ JSC_DEFINE_HOST_FUNCTION(signpostStop, (JSGlobalObject* globalObject, CallFrame*
     RETURN_IF_EXCEPTION(scope, EncodedJSValue());
 
     os_signpost_interval_end(WTFSignpostLogHandle(), os_signpost_id_make_with_pointer(WTFSignpostLogHandle(), globalObject), "JSGlobalObject signpost", "%" PUBLIC_LOG_STRING, message.ascii().data());
+    --activeJSGlobalObjectSignpostIntervalCount;
 
     return JSValue::encode(jsUndefined());
 }
@@ -802,8 +805,7 @@ void JSGlobalObject::init(VM& vm)
     JSCallee* globalCallee = JSCallee::create(vm, this, globalScope());
     m_globalCallee.set(vm, this, globalCallee);
 
-    JSCallee* stackOverflowFrameCallee = JSCallee::create(vm, this, globalScope());
-    m_stackOverflowFrameCallee.set(vm, this, stackOverflowFrameCallee);
+    m_partiallyInitializedFrameCallee.set(vm, this, JSCallee::create(vm, this, globalScope()));
 
     m_hostFunctionStructure.set(vm, this, JSFunction::createStructure(vm, this, m_functionPrototype.get()));
 
@@ -882,7 +884,7 @@ void JSGlobalObject::init(VM& vm)
 
     JS_GLOBAL_OBJECT_ADDITIONS_3;
 
-    m_speciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, globalOperationsSpeciesGetterCodeGenerator(vm), this), nullptr));
+    m_speciesGetterSetter.set(vm, this, GetterSetter::create(vm, this, JSFunction::create(vm, this, 0, "get [Symbol.species]"_s, globalFuncSpeciesGetter, ImplementationVisibility::Public, SpeciesGetterIntrinsic), nullptr));
 
     m_throwTypeErrorArgumentsCalleeGetterSetter.initLater(
         [] (const Initializer<GetterSetter>& init) {
@@ -1568,9 +1570,6 @@ capitalName ## Constructor* lowerName ## Constructor = featureFlag ? capitalName
     m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::min)].initLater([] (const Initializer<JSCell>& init) {
             init.set(JSFunction::create(init.vm, jsCast<JSGlobalObject*>(init.owner), 0, "min"_s, mathProtoFuncMin, ImplementationVisibility::Private, MinIntrinsic));
         });
-    m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::trunc)].initLater([] (const Initializer<JSCell>& init) {
-            init.set(JSFunction::create(init.vm, jsCast<JSGlobalObject*>(init.owner), 0, "trunc"_s, mathProtoFuncTrunc, ImplementationVisibility::Private, TruncIntrinsic));
-        });
     m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::repeatCharacter)].initLater([] (const Initializer<JSCell>& init) {
             init.set(JSFunction::create(init.vm, jsCast<JSGlobalObject*>(init.owner), 2, "repeatCharacter"_s, stringProtoFuncRepeatCharacter, ImplementationVisibility::Private));
         });
@@ -1606,6 +1605,12 @@ capitalName ## Constructor* lowerName ## Constructor = featureFlag ? capitalName
         });
     m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::setPrototypeDirectOrThrow)].initLater([] (const Initializer<JSCell>& init) {
             init.set(JSFunction::create(init.vm, jsCast<JSGlobalObject*>(init.owner), 2, "setPrototypeDirectOrThrow"_s, globalFuncSetPrototypeDirectOrThrow, ImplementationVisibility::Private));
+        });
+    m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::toIntegerOrInfinity)].initLater([] (const Initializer<JSCell>& init) {
+            init.set(JSFunction::create(init.vm, jsCast<JSGlobalObject*>(init.owner), 1, "toIntegerOrInfinity"_s, globalFuncToIntegerOrInfinity, ImplementationVisibility::Private, ToIntegerOrInfinityIntrinsic));
+        });
+    m_linkTimeConstants[static_cast<unsigned>(LinkTimeConstant::toLength)].initLater([] (const Initializer<JSCell>& init) {
+            init.set(JSFunction::create(init.vm, jsCast<JSGlobalObject*>(init.owner), 1, "toLength"_s, globalFuncToLength, ImplementationVisibility::Private, ToLengthIntrinsic));
         });
 
     // RegExp.prototype helpers.
@@ -2408,7 +2413,7 @@ void JSGlobalObject::visitChildrenImpl(JSCell* cell, Visitor& visitor)
     visitor.append(thisObject->m_globalLexicalEnvironment);
     visitor.append(thisObject->m_globalScopeExtension);
     visitor.append(thisObject->m_globalCallee);
-    visitor.append(thisObject->m_stackOverflowFrameCallee);
+    visitor.append(thisObject->m_partiallyInitializedFrameCallee);
     JS_GLOBAL_OBJECT_ADDITIONS_4;
     thisObject->m_evalErrorStructure.visit(visitor);
     thisObject->m_rangeErrorStructure.visit(visitor);
@@ -2947,6 +2952,89 @@ void JSGlobalObject::installSetPrototypeWatchpoint(SetPrototype* setPrototype)
     ObjectPropertyCondition condition = setupAdaptiveWatchpoint(this, setPrototype, vm.propertyNames->add);
     m_setPrototypeAddWatchpoint = makeUnique<ObjectPropertyChangeAdaptiveWatchpoint<InlineWatchpointSet>>(this, condition, m_setAddWatchpointSet);
     m_setPrototypeAddWatchpoint->install(vm);
+}
+
+void JSGlobalObject::tryInstallPropertyDescriptorFastPathWatchpoint()
+{
+    VM& vm = this->vm();
+
+    DeferTerminationForAWhile deferScope(vm);
+    auto catchScope = DECLARE_CATCH_SCOPE(vm);
+
+    auto invalidate = [&]() {
+        m_propertyDescriptorFastPathWatchpointSet.invalidate(vm, StringFireDetail("Was not able to set up property descriptor related names watchpoint set."));
+    };
+
+    auto absenceCondition = [&](JSObject* base, PropertyName propertyName) -> std::optional<ObjectPropertyCondition> {
+        PropertySlot slot(base, PropertySlot::InternalMethodType::VMInquiry, &vm);
+        bool result = base->getOwnPropertySlot(base, this, propertyName, slot);
+        if (result)
+            return std::nullopt;
+        catchScope.assertNoException();
+        RELEASE_ASSERT(slot.isUnset());
+        return ObjectPropertyCondition::absence(vm, this, base, propertyName.uid(), nullptr);
+    };
+
+    if (!objectPrototypeChainIsSane()) {
+        invalidate();
+        return;
+    }
+
+    Vector<ObjectPropertyCondition, 8> conditions;
+    {
+        auto condition = absenceCondition(objectPrototype(), vm.propertyNames->get);
+        if (!condition) {
+            invalidate();
+            return;
+        }
+        conditions.append(condition.value());
+    }
+    {
+        auto condition = absenceCondition(objectPrototype(), vm.propertyNames->set);
+        if (!condition) {
+            invalidate();
+            return;
+        }
+        conditions.append(condition.value());
+    }
+    {
+        auto condition = absenceCondition(objectPrototype(), vm.propertyNames->enumerable);
+        if (!condition) {
+            invalidate();
+            return;
+        }
+        conditions.append(condition.value());
+    }
+    {
+        auto condition = absenceCondition(objectPrototype(), vm.propertyNames->configurable);
+        if (!condition) {
+            invalidate();
+            return;
+        }
+        conditions.append(condition.value());
+    }
+    {
+        auto condition = absenceCondition(objectPrototype(), vm.propertyNames->writable);
+        if (!condition) {
+            invalidate();
+            return;
+        }
+        conditions.append(condition.value());
+    }
+
+    for (auto& condition : conditions) {
+        if (!condition.isWatchable(PropertyCondition::EnsureWatchability)) {
+            invalidate();
+            return;
+        }
+    }
+
+    RELEASE_ASSERT(!m_propertyDescriptorFastPathWatchpointSet.isBeingWatched());
+    m_propertyDescriptorFastPathWatchpointSet.touch(vm, "Set up property descriptor fast path watchpoint set.");
+    for (auto& condition : conditions) {
+        m_missWatchpoints.append(makeUnique<ObjectAdaptiveStructureWatchpoint>(this, condition, m_propertyDescriptorFastPathWatchpointSet));
+        m_missWatchpoints.last()->install(vm);
+    }
 }
 
 void slowValidateCell(JSGlobalObject* globalObject)

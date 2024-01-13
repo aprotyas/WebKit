@@ -44,6 +44,9 @@
 namespace WebCore {
 
 class AXIsolatedTree;
+#if ENABLE(AX_THREAD_TEXT_APIS)
+struct AXTextRuns;
+#endif
 
 class AXIsolatedObject final : public AXCoreObject {
     friend class AXIsolatedTree;
@@ -51,6 +54,7 @@ public:
     static Ref<AXIsolatedObject> create(const Ref<AccessibilityObject>&, AXIsolatedTree*);
     ~AXIsolatedObject();
 
+    AXID treeID() const final { return tree()->treeID(); }
     ProcessID processID() const final { return tree()->processID(); }
     String dbg() const final;
 
@@ -59,9 +63,16 @@ public:
     bool isTable() const final { return boolAttributeValue(AXPropertyName::IsTable); }
     bool isExposable() const final { return boolAttributeValue(AXPropertyName::IsExposable); }
 
+    const AccessibilityChildrenVector& children(bool updateChildrenIfNeeded = true) final;
+    AXCoreObject* sibling(AXDirection) const;
     AXIsolatedObject* parentObject() const final { return parentObjectUnignored(); }
+    AXIsolatedObject* parentObjectUnignored() const final;
     AXIsolatedObject* editableAncestor() final { return Accessibility::editableAncestor(*this); };
     bool canSetFocusAttribute() const final { return boolAttributeValue(AXPropertyName::CanSetFocusAttribute); }
+
+#if ENABLE(AX_THREAD_TEXT_APIS)
+    const AXTextRuns* textRuns() const;
+#endif
 
 private:
     void detachRemoteParts(AccessibilityDetachmentType) final;
@@ -83,6 +94,8 @@ private:
     void setProperty(AXPropertyName, AXPropertyValueVariant&&);
     void setObjectProperty(AXPropertyName, AXCoreObject*);
     void setObjectVectorProperty(AXPropertyName, const AccessibilityChildrenVector&);
+
+    static bool canBeMultilineTextField(AccessibilityObject&, bool isNonNativeTextControl);
 
     // FIXME: consolidate all AttributeValue retrieval in a single template method.
     bool boolAttributeValue(AXPropertyName) const;
@@ -192,6 +205,8 @@ private:
     bool isRequired() const final { return boolAttributeValue(AXPropertyName::IsRequired); }
     bool supportsRequiredAttribute() const final { return boolAttributeValue(AXPropertyName::SupportsRequiredAttribute); }
     bool isExpanded() const final { return boolAttributeValue(AXPropertyName::IsExpanded); }
+    bool isFileUploadButton() const final { return boolAttributeValue(AXPropertyName::IsFileUploadButton); }
+    bool isMeter() const final { return boolAttributeValue(AXPropertyName::IsMeter); };
     FloatPoint screenRelativePosition() const final;
     FloatRect relativeFrame() const final;
 #if PLATFORM(MAC)
@@ -239,9 +254,7 @@ private:
     Vector<String> determineDropEffects() const final;
     AXIsolatedObject* accessibilityHitTest(const IntPoint&) const final;
     AXIsolatedObject* focusedUIElement() const final;
-    AXIsolatedObject* parentObjectUnignored() const final;
     AccessibilityChildrenVector linkedObjects() const final { return tree()->objectsForIDs(vectorAttributeValue<AXID>(AXPropertyName::LinkedObjects)); }
-    AXIsolatedObject* titleUIElement() const final { return objectAttributeValue(AXPropertyName::TitleUIElement); }
     AXIsolatedObject* scrollBar(AccessibilityOrientation) final;
     const String placeholderValue() const final { return stringAttributeValue(AXPropertyName::PlaceholderValue); }
     String expandedTextValue() const final { return stringAttributeValue(AXPropertyName::ExpandedTextValue); }
@@ -297,10 +310,8 @@ private:
     void mathPostscripts(AccessibilityMathMultiscriptPairs&) final;
 #if PLATFORM(COCOA)
     String speechHintAttributeValue() const final { return stringAttributeValue(AXPropertyName::SpeechHint); }
-    String descriptionAttributeValue() const final;
-    String helpTextAttributeValue() const final;
-    String titleAttributeValue() const final;
 #endif
+    bool fileUploadButtonReturnsValueInTitle() const final;
 #if PLATFORM(MAC)
     bool caretBrowsingEnabled() const final { return boolAttributeValue(AXPropertyName::CaretBrowsingEnabled); }
 #endif
@@ -314,7 +325,6 @@ private:
     AccessibilityChildrenVector visibleChildren() final { return tree()->objectsForIDs(vectorAttributeValue<AXID>(AXPropertyName::VisibleChildren)); }
     AtomString tagName() const final;
     void setChildrenIDs(Vector<AXID>&&);
-    const AccessibilityChildrenVector& children(bool updateChildrenIfNeeded = true) final;
     void updateChildrenIfNecessary() final;
     bool isDetachedFromParent() final;
     AXIsolatedObject* liveRegionAncestor(bool excludeIfOff = true) const final { return Accessibility::liveRegionAncestor(*this, excludeIfOff); }
@@ -441,7 +451,7 @@ private:
     bool isNativeTextControl() const final;
     bool isListBoxOption() const final;
     bool isMockObject() const final;
-    bool isNonNativeTextControl() const final;
+    bool isNonNativeTextControl() const final { return boolAttributeValue(AXPropertyName::IsNonNativeTextControl); }
     bool isIndeterminate() const final { return boolAttributeValue(AXPropertyName::IsIndeterminate); }
     bool isLoaded() const final { return loadingProgress() >= 1; }
     bool isOnScreen() const final;
@@ -471,8 +481,6 @@ private:
     bool supportsChecked() const final;
     bool isModalNode() const final;
     bool isDescendantOfRole(AccessibilityRole) const final;
-    AXCoreObject* correspondingLabelForControlElement() const final;
-    AXCoreObject* correspondingControlForLabelElement() const final;
     bool inheritsPresentationalRole() const final;
     void setAccessibleName(const AtomString&) final;
 

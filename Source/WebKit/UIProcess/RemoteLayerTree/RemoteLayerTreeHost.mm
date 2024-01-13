@@ -26,6 +26,7 @@
 #import "config.h"
 #import "RemoteLayerTreeHost.h"
 
+#import "LayerProperties.h"
 #import "Logging.h"
 #import "RemoteLayerTreeDrawingAreaProxy.h"
 #import "RemoteLayerTreePropertyApplier.h"
@@ -101,6 +102,11 @@ bool RemoteLayerTreeHost::css3DTransformInteroperabilityEnabled() const
     return m_drawingArea->page().preferences().css3DTransformInteroperabilityEnabled();
 }
 
+bool RemoteLayerTreeHost::threadedAnimationResolutionEnabled() const
+{
+    return m_drawingArea->page().preferences().threadedAnimationResolutionEnabled();
+}
+
 #if PLATFORM(MAC)
 bool RemoteLayerTreeHost::updateBannerLayers(const RemoteLayerTreeTransaction& transaction)
 {
@@ -168,6 +174,9 @@ bool RemoteLayerTreeHost::updateLayerTree(const RemoteLayerTreeTransaction& tran
 
     if (auto contextHostedID = transaction.remoteContextHostedIdentifier()) {
         m_hostedLayers.set(*contextHostedID, rootNode->layerID());
+        m_hostedLayersInProcess.ensure(transaction.processIdentifier(), [] {
+            return HashSet<WebCore::PlatformLayerIdentifier>();
+        }).iterator->value.add(rootNode->layerID());
         rootNode->setRemoteContextHostedIdentifier(*contextHostedID);
         if (auto* remoteRootNode = nodeForID(m_hostingLayers.get(*contextHostedID)))
             [remoteRootNode->layer() addSublayer:rootNode->layer()];
@@ -202,7 +211,7 @@ bool RemoteLayerTreeHost::updateLayerTree(const RemoteLayerTreeTransaction& tran
         layerForID(layerAndClone.layerID).contents = layerForID(layerAndClone.cloneLayerID).contents;
 
     for (auto& destroyedLayer : transaction.destroyedLayers())
-        layerWillBeRemoved(destroyedLayer);
+        layerWillBeRemoved(transaction.processIdentifier(), destroyedLayer);
 
     // Drop the contents of any layers which were unparented; the Web process will re-send
     // the backing store in the commit that reparents them.
@@ -236,7 +245,7 @@ RemoteLayerTreeNode* RemoteLayerTreeHost::nodeForID(PlatformLayerIdentifier laye
     return m_nodes.get(layerID);
 }
 
-void RemoteLayerTreeHost::layerWillBeRemoved(WebCore::PlatformLayerIdentifier layerID)
+void RemoteLayerTreeHost::layerWillBeRemoved(WebCore::ProcessIdentifier processIdentifier, WebCore::PlatformLayerIdentifier layerID)
 {
     auto animationDelegateIter = m_animationDelegates.find(layerID);
     if (animationDelegateIter != m_animationDelegates.end()) {
@@ -247,8 +256,16 @@ void RemoteLayerTreeHost::layerWillBeRemoved(WebCore::PlatformLayerIdentifier la
     if (auto node = m_nodes.take(layerID)) {
         if (auto hostingIdentifier = node->remoteContextHostingIdentifier())
             m_hostingLayers.remove(*hostingIdentifier);
-        if (auto hostedIdentifier = node->remoteContextHostedIdentifier())
-            m_hostedLayers.remove(*hostedIdentifier);
+        if (auto hostedIdentifier = node->remoteContextHostedIdentifier()) {
+            if (auto layerID = m_hostedLayers.take(*hostedIdentifier)) {
+                auto it = m_hostedLayersInProcess.find(processIdentifier);
+                if (it != m_hostedLayersInProcess.end()) {
+                    it->value.remove(layerID);
+                    if (it->value.isEmpty())
+                        m_hostedLayersInProcess.remove(it);
+                }
+            }
+        }
     }
 
 #if HAVE(AVKIT)
@@ -259,8 +276,6 @@ void RemoteLayerTreeHost::layerWillBeRemoved(WebCore::PlatformLayerIdentifier la
         m_videoLayers.remove(videoLayerIter);
     }
 #endif
-
-    m_nodes.remove(layerID);
 }
 
 void RemoteLayerTreeHost::animationDidStart(WebCore::PlatformLayerIdentifier layerID, CAAnimation *animation, MonotonicTime startTime)
@@ -396,12 +411,7 @@ std::unique_ptr<RemoteLayerTreeNode> RemoteLayerTreeHost::makeNode(const RemoteL
         return makeWithLayer(adoptNS([[CATransformLayer alloc] init]));
 
     case PlatformCALayer::LayerType::LayerTypeBackdropLayer:
-#if ENABLE(FILTERS_LEVEL_2)
         return makeWithLayer(adoptNS([[CABackdropLayer alloc] init]));
-#else
-        ASSERT_NOT_REACHED();
-        return RemoteLayerTreeNode::createWithPlainLayer(properties.layerID);
-#endif
     case PlatformCALayer::LayerType::LayerTypeCustom:
     case PlatformCALayer::LayerType::LayerTypeAVPlayerLayer:
         if (m_isDebugLayerTreeHost)
@@ -449,6 +459,31 @@ static void recursivelyMapIOSurfaceBackingStore(CALayer *layer)
 void RemoteLayerTreeHost::mapAllIOSurfaceBackingStore()
 {
     recursivelyMapIOSurfaceBackingStore(rootLayer());
+}
+
+#if ENABLE(THREADED_ANIMATION_RESOLUTION)
+void RemoteLayerTreeHost::animationsWereAddedToNode(RemoteLayerTreeNode& node)
+{
+    m_drawingArea->animationsWereAddedToNode(node);
+}
+
+void RemoteLayerTreeHost::animationsWereRemovedFromNode(RemoteLayerTreeNode& node)
+{
+    m_drawingArea->animationsWereRemovedFromNode(node);
+}
+
+Seconds RemoteLayerTreeHost::acceleratedTimelineTimeOrigin() const
+{
+    return m_drawingArea->acceleratedTimelineTimeOrigin();
+}
+#endif
+
+void RemoteLayerTreeHost::remotePageProcessCrashed(WebCore::ProcessIdentifier processIdentifier)
+{
+    for (auto layerID : m_hostedLayersInProcess.take(processIdentifier)) {
+        [layerForID(layerID) removeFromSuperlayer];
+        layerWillBeRemoved(processIdentifier, layerID);
+    }
 }
 
 } // namespace WebKit

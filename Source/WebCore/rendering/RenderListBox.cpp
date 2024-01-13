@@ -115,7 +115,7 @@ static FontCascade bolder(Document& document, const FontCascade& font)
 {
     auto description = font.fontDescription();
     description.setWeight(description.bolderWeight());
-    auto result = FontCascade { WTFMove(description), font.letterSpacing(), font.wordSpacing() };
+    FontCascade result(WTFMove(description), font);
     result.update(&document.fontSelector());
     return result;
 }
@@ -492,18 +492,19 @@ void RenderListBox::paintItemForeground(PaintInfo& paintInfo, const LayoutPoint&
         return;
 
     String itemText;
-    bool isOptionElement = is<HTMLOptionElement>(*listItemElement);
-    if (isOptionElement)
-        itemText = downcast<HTMLOptionElement>(*listItemElement).textIndentedToRespectGroupLabel();
-    else if (is<HTMLOptGroupElement>(*listItemElement))
-        itemText = downcast<HTMLOptGroupElement>(*listItemElement).groupLabelText();
+    RefPtr optionElement = dynamicDowncast<HTMLOptionElement>(*listItemElement);
+    RefPtr optGroupElement = dynamicDowncast<HTMLOptGroupElement>(*listItemElement);
+    if (optionElement)
+        itemText = optionElement->textIndentedToRespectGroupLabel();
+    else if (optGroupElement)
+        itemText = optGroupElement->groupLabelText();
     itemText = applyTextTransform(style(), itemText, ' ');
 
     if (itemText.isNull())
         return;
 
     Color textColor = itemStyle->visitedDependentColorWithColorFilter(CSSPropertyColor);
-    if (isOptionElement && downcast<HTMLOptionElement>(*listItemElement).selected()) {
+    if (optionElement && optionElement->selected()) {
         if (frame().selection().isFocusedAndActive() && document().focusedElement() == &selectElement())
             textColor = theme().activeListBoxSelectionForegroundColor(styleColorOptions());
         // Honor the foreground color for disabled items
@@ -528,10 +529,10 @@ void RenderListBox::paintItemForeground(PaintInfo& paintInfo, const LayoutPoint&
         paintInfo.context().translate(-rotationOrigin);
     }
 
-    if (is<HTMLOptGroupElement>(*listItemElement)) {
+    if (optGroupElement) {
         auto description = itemFont.fontDescription();
         description.setWeight(description.bolderWeight());
-        itemFont = FontCascade(WTFMove(description), itemFont.letterSpacing(), itemFont.wordSpacing());
+        itemFont = FontCascade(WTFMove(description), itemFont);
         itemFont.update(&document().fontSelector());
     }
 
@@ -548,7 +549,7 @@ void RenderListBox::paintItemBackground(PaintInfo& paintInfo, const LayoutPoint&
         return;
 
     Color backColor;
-    if (is<HTMLOptionElement>(*listItemElement) && downcast<HTMLOptionElement>(*listItemElement).selected()) {
+    if (auto* option = dynamicDowncast<HTMLOptionElement>(*listItemElement); option && option->selected()) {
         if (frame().selection().isFocusedAndActive() && document().focusedElement() == &selectElement())
             backColor = theme().activeListBoxSelectionBackgroundColor(styleColorOptions());
         else
@@ -731,8 +732,7 @@ bool RenderListBox::scrollToRevealElementAtListIndex(int index)
     if (style().isFlippedBlocksWritingMode())
         newOffset *= -1;
 
-    scrollToOffsetWithoutAnimation(scrollbarOrientationForWritingMode(), newOffset);
-
+    scrollToPosition(newOffset);
     return true;
 }
 
@@ -946,6 +946,25 @@ int RenderListBox::logicalScrollTop() const
     return logicalTop;
 }
 
+void RenderListBox::scrollToPosition(int positionIndex)
+{
+    auto orientation = scrollbarOrientationForWritingMode();
+    auto scrollOrigin = this->scrollOrigin();
+
+    int offsetIndex = positionIndex;
+
+    switch (orientation) {
+    case ScrollbarOrientation::Vertical:
+        offsetIndex = positionIndex + scrollOrigin.y();
+        break;
+    case ScrollbarOrientation::Horizontal:
+        offsetIndex = positionIndex + scrollOrigin.x();
+        break;
+    }
+
+    scrollToOffsetWithoutAnimation(orientation, offsetIndex);
+}
+
 void RenderListBox::setLogicalScrollTop(int newLogicalScrollTop)
 {
     bool isFlippedBlocksWritingMode = style().isFlippedBlocksWritingMode();
@@ -963,7 +982,7 @@ void RenderListBox::setLogicalScrollTop(int newLogicalScrollTop)
         index *= -1;
 
     setupWheelEventTestMonitor(*this);
-    scrollToOffsetWithoutAnimation(scrollbarOrientationForWritingMode(), index);
+    scrollToPosition(index);
 }
 
 bool RenderListBox::nodeAtPoint(const HitTestRequest& request, HitTestResult& result, const HitTestLocation& locationInContainer, const LayoutPoint& accumulatedOffset, HitTestAction hitTestAction)

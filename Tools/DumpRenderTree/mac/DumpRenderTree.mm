@@ -905,9 +905,6 @@ static void setWebPreferencesForTestOptions(WebPreferences *preferences, const W
 
         for (const auto& [key, value] : options.stringWebPreferenceFeatures())
             [preferences _setStringPreferenceForTestingWithValue:toNS(value).get() forKey:toNS(WTR::TestOptions::toWebKitLegacyPreferenceKey(key)).get()];
-
-        // FIXME: Tests currently expect this to always be false in WebKitLegacy testing - https://bugs.webkit.org/show_bug.cgi?id=222864.
-        [preferences _setBoolPreferenceForTestingWithValue:NO forKey:@"WebKitLayoutFormattingContextEnabled"];
     }];
 
     [WebPreferences _clearNetworkLoaderSession:^{ }];
@@ -1895,6 +1892,8 @@ static NSURL *computeTestURL(NSString *pathOrURLString, NSString **relativeTestP
 
 static WTR::TestOptions testOptionsForTest(const WTR::TestCommand& command)
 {
+    // hack for cases when useDollarVM will be reset before injectInternalsObject is called in DRT
+    JSC::Options::useDollarVM() = true;
     WTR::TestFeatures features = WTR::TestOptions::defaults();
     WTR::merge(features, WTR::hardcodedFeaturesBasedOnPathForTest(command));
     WTR::merge(features, WTR::featureDefaultsFromTestHeaderForTest(command, WTR::TestOptions::keyTypeMapping()));

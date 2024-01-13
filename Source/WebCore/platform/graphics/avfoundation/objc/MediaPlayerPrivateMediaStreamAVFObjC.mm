@@ -193,9 +193,9 @@ public:
 private:
     MediaPlayerEnums::MediaEngineIdentifier identifier() const final { return MediaPlayerEnums::MediaEngineIdentifier::AVFoundationMediaStream; };
 
-    std::unique_ptr<MediaPlayerPrivateInterface> createMediaEnginePlayer(MediaPlayer* player) const final
+    Ref<MediaPlayerPrivateInterface> createMediaEnginePlayer(MediaPlayer* player) const final
     {
-        return makeUnique<MediaPlayerPrivateMediaStreamAVFObjC>(player);
+        return adoptRef(*new MediaPlayerPrivateMediaStreamAVFObjC(player));
     }
 
     void getSupportedTypes(HashSet<String>& types) const final
@@ -398,7 +398,7 @@ void MediaPlayerPrivateMediaStreamAVFObjC::ensureLayers()
     if (activeVideoTrack->source().isCaptureSource())
         m_sampleBufferDisplayLayer->setRenderPolicy(SampleBufferDisplayLayer::RenderPolicy::Immediately);
 
-    m_sampleBufferDisplayLayer->initialize(hideRootLayer(), size, [weakThis = WeakPtr { *this }, weakLayer = ThreadSafeWeakPtr { *m_sampleBufferDisplayLayer }, size](auto didSucceed) {
+    m_sampleBufferDisplayLayer->initialize(hideRootLayer(), size, m_shouldMaintainAspectRatio, [weakThis = WeakPtr { *this }, weakLayer = ThreadSafeWeakPtr { *m_sampleBufferDisplayLayer }, size](auto didSucceed) {
         auto layer = weakLayer.get();
         if (weakThis && layer && layer.get() == weakThis->m_sampleBufferDisplayLayer.get())
             weakThis->layersAreInitialized(size, didSucceed);
@@ -1078,7 +1078,7 @@ void MediaPlayerPrivateMediaStreamAVFObjC::paintCurrentFrameInContext(GraphicsCo
     AffineTransform videoTransform = videoTransformationMatrix(*m_imagePainter.videoFrame);
     FloatRect transformedDestRect = valueOrDefault(videoTransform.inverse()).mapRect(destRect);
     context.concatCTM(videoTransform);
-    context.drawNativeImage(*image, imageRect.size(), transformedDestRect, imageRect);
+    context.drawNativeImage(*image, transformedDestRect, imageRect);
 }
 
 RefPtr<VideoFrame> MediaPlayerPrivateMediaStreamAVFObjC::videoFrameForCurrentTime()
@@ -1225,6 +1225,13 @@ void MediaPlayerPrivateMediaStreamAVFObjC::requestHostingContextID(LayerHostingC
         return;
     }
     m_layerHostingContextIDCallback = WTFMove(callback);
+}
+
+void MediaPlayerPrivateMediaStreamAVFObjC::setShouldMaintainAspectRatio(bool shouldMaintainAspectRatio)
+{
+    m_shouldMaintainAspectRatio = shouldMaintainAspectRatio;
+    if (m_sampleBufferDisplayLayer)
+        m_sampleBufferDisplayLayer->setShouldMaintainAspectRatio(shouldMaintainAspectRatio);
 }
 
 }

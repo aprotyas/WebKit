@@ -263,11 +263,6 @@
 #define USE_CFNETWORK_CONTENT_ENCODING_SNIFFING_OVERRIDE 1
 #endif
 
-#if PLATFORM(MAC) || USE(THEME_ADWAITA)
-/* FIXME: This really needs a descriptive name, this "new theme" was added in 2008. */
-#define USE_NEW_THEME 1
-#endif
-
 #if PLATFORM(IOS) || PLATFORM(MACCATALYST) || PLATFORM(VISION)
 #define USE_UICONTEXTMENU 1
 #endif
@@ -329,6 +324,16 @@
 
 #if !defined(USE_ISO_MALLOC)
 #define USE_ISO_MALLOC 1
+#endif
+
+#if !defined(USE_TZONE_MALLOC)
+#if CPU(ARM64)
+// Only MacroAssemblerARM64 is known to build.
+// Building with TZONE_MALLOC currently disabled for all platforms.
+#define USE_TZONE_MALLOC 0
+#else
+#define USE_TZONE_MALLOC 0
+#endif
 #endif
 
 #if !PLATFORM(WATCHOS)
@@ -421,8 +426,4 @@
     || (PLATFORM(APPLETV) && __TV_OS_VERSION_MIN_REQUIRED >= 170000) \
     || PLATFORM(VISION)
 #define USE_SANDBOX_VERSION_3 1
-#endif
-
-#if (PLATFORM(IOS) && __IPHONE_OS_VERSION_MAX_ALLOWED >= 170400)
-#define USE_EXTENSIONKIT 1
 #endif

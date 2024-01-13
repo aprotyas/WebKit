@@ -39,6 +39,8 @@ static auto *tabsManifest = @{
     @"description": @"Tabs Test",
     @"version": @"1",
 
+    @"options_page": @"options.html",
+
     @"background": @{
         @"scripts": @[ @"background.js" ],
         @"type": @"module",
@@ -104,7 +106,7 @@ TEST(WKWebExtensionAPITabs, Errors)
         @"browser.test.assertThrows(() => browser.tabs.get(-3), /'tabId' value is invalid, because it is not a tab identifier/i)",
         @"browser.test.assertThrows(() => browser.tabs.duplicate('bad'), /'tabId' value is invalid, because a number is expected/i)",
         @"browser.test.assertThrows(() => browser.tabs.remove('bad'), /'tabIDs' value is invalid, because a number or an array of numbers is expected, but a string was provided/i)",
-        @"browser.test.assertThrows(() => browser.tabs.remove(['bad']), /'tabIDs' value is invalid, because a number or an array of numbers is expected, but an array with other values was provided/i)",
+        @"browser.test.assertThrows(() => browser.tabs.remove(['bad']), /'tabIDs' value is invalid, because a number or an array of numbers is expected, but an array of other values was provided/i)",
         @"browser.test.assertThrows(() => browser.tabs.reload('bad'), /an unknown argument was provided/i)",
         @"browser.test.assertThrows(() => browser.tabs.goBack('bad'), /'tabId' value is invalid, because a number is expected/i)",
         @"browser.test.assertThrows(() => browser.tabs.goForward('bad'), /'tabId' value is invalid, because a number is expected/i)",
@@ -126,7 +128,7 @@ TEST(WKWebExtensionAPITabs, Errors)
         @"browser.test.assertThrows(() => browser.tabs.query({ status: 'bad' }), /'status' value is invalid, because it must specify either 'loading' or 'complete'/i)",
 
         @"browser.test.assertThrows(() => browser.tabs.query({ url: 12345 }), /'info' value is invalid, because 'url' is expected to be a string or an array of strings, but a number was provided/i)",
-        @"browser.test.assertThrows(() => browser.tabs.query({ url: ['bad', 12345] }), /'url' is expected to be a string or an array of strings, but an array with other values was provided/i)",
+        @"browser.test.assertThrows(() => browser.tabs.query({ url: ['bad', 12345] }), /'url' is expected to be a string or an array of strings, but an array of other values was provided/i)",
 
         @"browser.test.assertThrows(() => browser.tabs.query({ windowId: 'bad' }), /'windowId' is expected to be a number, but a string was provided/i)",
         @"browser.test.assertThrows(() => browser.tabs.query({ windowId: -5 }), /'windowId' value is invalid, because '-5' is not a window identifier/i)",
@@ -488,12 +490,13 @@ TEST(WKWebExtensionAPITabs, Get)
     [manager loadAndRun];
 }
 
-TEST(WKWebExtensionAPITabs, GetCurrent)
+TEST(WKWebExtensionAPITabs, GetCurrentFromBackgroundPage)
 {
     auto *backgroundScript = Util::constructScript(@[
+        @"const [currentTab] = await browser.tabs.query({ active: true, currentWindow: true })",
         @"const tab = await browser.tabs.getCurrent()",
 
-        @"browser.test.assertEq(tab, undefined, 'The current tab should be undefined in the background page')",
+        @"browser.test.assertDeepEq(tab, currentTab, 'The current tab should be')",
 
         @"browser.test.notifyPass()"
     ]);
@@ -506,6 +509,44 @@ TEST(WKWebExtensionAPITabs, GetCurrent)
     EXPECT_EQ(manager.get().defaultWindow.tabs.count, 2lu);
 
     [manager loadAndRun];
+}
+
+TEST(WKWebExtensionAPITabs, GetCurrentFromOptionsPage)
+{
+    auto *optionsScript = Util::constructScript(@[
+        @"const tab = await browser.tabs.getCurrent()",
+
+        @"browser.test.assertEq(typeof tab, 'object', 'The tab should be')",
+        @"browser.test.assertTrue(tab.active, 'The current tab should be active')",
+
+        @"browser.test.notifyPass()"
+    ]);
+
+    auto *resources = @{
+        @"background.js": @"// Not Used",
+        @"options.html": @"<script type='module' src='options.js'></script>",
+        @"options.js": optionsScript
+    };
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifest resources:resources]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    [manager load];
+
+    [manager.get().defaultWindow openNewTab];
+
+    EXPECT_EQ(manager.get().defaultWindow.tabs.count, 2lu);
+
+    auto *optionsPageURL = manager.get().context.optionsPageURL;
+    EXPECT_NOT_NULL(optionsPageURL);
+
+    auto *defaultTab = manager.get().defaultTab;
+    EXPECT_NOT_NULL(defaultTab);
+
+    [defaultTab changeWebViewIfNeededForURL:optionsPageURL forExtensionContext:manager.get().context];
+    [defaultTab.mainWebView loadRequest:[NSURLRequest requestWithURL:optionsPageURL]];
+
+    [manager run];
 }
 
 TEST(WKWebExtensionAPITabs, Query)
@@ -909,14 +950,14 @@ TEST(WKWebExtensionAPITabs, UpdatedEvent)
         @"}",
 
         @"browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {",
-        @"  if (changeInfo.hasOwnProperty('mutedInfo')) {",
+        @"  if ('mutedInfo' in changeInfo) {",
         @"    browser.test.assertEq(tabId, newTab.id, 'The updated tab should have the correct id for muted change')",
         @"    browser.test.assertTrue(changeInfo.mutedInfo.muted, 'The tab should be muted')",
         @"    browser.test.assertDeepEq(changeInfo.mutedInfo, tab.mutedInfo, 'The mutedInfo in changeInfo should match the mutedInfo of the tab')",
         @"    mutedUpdated = true",
         @"  }",
 
-        @"  if (changeInfo.hasOwnProperty('pinned')) {",
+        @"  if ('pinned' in changeInfo) {",
         @"    browser.test.assertEq(tabId, newTab.id, 'The updated tab should have the correct id for pinned change')",
         @"    browser.test.assertTrue(changeInfo.pinned, 'The tab should be pinned')",
         @"    browser.test.assertEq(changeInfo.pinned, tab.pinned, 'The pinned status in changeInfo should match the pinned status of the tab')",
@@ -932,8 +973,7 @@ TEST(WKWebExtensionAPITabs, UpdatedEvent)
     Util::loadAndRunExtension(tabsManifest, @{ @"background.js": backgroundScript });
 }
 
-// FIXME after rdar://115809590 is resolved.
-TEST(WKWebExtensionAPITabs, DISABLED_RemovedEvent)
+TEST(WKWebExtensionAPITabs, RemovedEvent)
 {
     auto *backgroundScript = Util::constructScript(@[
         @"const newTab = await browser.tabs.create({})",
@@ -1143,13 +1183,17 @@ TEST(WKWebExtensionAPITabs, SendMessage)
     }, TestWebKitAPI::HTTPServer::Protocol::Http);
 
     auto *backgroundScript = Util::constructScript(@[
-        @"const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
-        @"const tabId = tabs[0].id",
+        @"browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {",
+        @"  browser.test.assertEq(message, 'Ready')",
 
-        @"const response = await browser.test.assertSafeResolve(() => browser.tabs.sendMessage(tabId, { content: 'Hello' }))",
-        @"browser.test.assertEq(response.content, 'Received', 'Should get the response from the content script')",
+        @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
+        @"  const tabId = tabs[0].id",
 
-        @"browser.test.notifyPass()"
+        @"  const response = await browser.test.assertSafeResolve(() => browser.tabs.sendMessage(tabId, { content: 'Hello' }))",
+        @"  browser.test.assertEq(response?.content, 'Received', 'Should get the response from the content script')",
+
+        @"  browser.test.notifyPass()",
+        @"})"
     ]);
 
     auto *contentScript = Util::constructScript(@[
@@ -1168,7 +1212,62 @@ TEST(WKWebExtensionAPITabs, SendMessage)
         @"  browser.test.assertEq(sender.frameId, undefined, 'sender.frameId should be undefined')",
 
         @"  sendResponse({ content: 'Received' })",
+        @"})",
+
+        @"setTimeout(() => browser.runtime.sendMessage('Ready'), 1000)"
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsContentScriptManifest resources:@{ @"background.js": backgroundScript, @"content.js": contentScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    auto *urlRequest = server.requestWithLocalhost();
+    [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forURL:urlRequest.URL];
+    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
+
+    [manager loadAndRun];
+}
+
+TEST(WKWebExtensionAPITabs, SendMessageWithAsyncReply)
+{
+    TestWebKitAPI::HTTPServer server({
+        { "/"_s, { { { "Content-Type"_s, "text/html"_s } }, ""_s } },
+    }, TestWebKitAPI::HTTPServer::Protocol::Http);
+
+    auto *backgroundScript = Util::constructScript(@[
+        @"browser.runtime.onMessage.addListener(async (message, sender, sendResponse) => {",
+        @"  browser.test.assertEq(message, 'Ready')",
+
+        @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
+        @"  const tabId = tabs[0].id",
+
+        @"  const response = await browser.test.assertSafeResolve(() => browser.tabs.sendMessage(tabId, { content: 'Hello' }))",
+        @"  browser.test.assertEq(response?.content, 'Received', 'Should get the response from the content script')",
+
+        @"  browser.test.notifyPass()",
         @"})"
+    ]);
+
+    auto *contentScript = Util::constructScript(@[
+        @"browser.runtime.onMessage.addListener((message, sender, sendResponse) => {",
+        @"  browser.test.assertEq(message.content, 'Hello', 'Should receive the correct message content')",
+
+        @"  browser.test.assertEq(typeof sender, 'object', 'sender should be an object')",
+
+        @"  browser.test.assertEq(typeof sender.url, 'string', 'sender.url should be a string')",
+        @"  browser.test.assertEq(typeof sender.origin, 'string', 'sender.origin should be a string')",
+
+        @"  browser.test.assertTrue(sender.url.startsWith('webkit-extension://'), 'sender.url should start with webkit-extension://')",
+        @"  browser.test.assertTrue(sender.origin.startsWith('webkit-extension://'), 'sender.origin should start with webkit-extension://')",
+
+        @"  browser.test.assertEq(sender.tab, undefined, 'sender.tab should be undefined')",
+        @"  browser.test.assertEq(sender.frameId, undefined, 'sender.frameId should be undefined')",
+
+        @"  setTimeout(() => sendResponse({ content: 'Received' }), 1000)",
+
+        @"  return true",
+        @"})",
+
+        @"setTimeout(() => browser.runtime.sendMessage('Ready'), 1000)"
     ]);
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsContentScriptManifest resources:@{ @"background.js": backgroundScript, @"content.js": contentScript }]);
@@ -1188,13 +1287,17 @@ TEST(WKWebExtensionAPITabs, SendMessageWithPromiseReply)
     }, TestWebKitAPI::HTTPServer::Protocol::Http);
 
     auto *backgroundScript = Util::constructScript(@[
-        @"const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
-        @"const tabId = tabs[0].id",
+        @"browser.runtime.onMessage.addListener(async (message, sender) => {",
+        @"  browser.test.assertEq(message, 'Ready')",
 
-        @"const response = await browser.test.assertSafeResolve(() => browser.tabs.sendMessage(tabId, { content: 'Hello' }))",
-        @"browser.test.assertEq(response.content, 'Received', 'Should get the response from the content script')",
+        @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
+        @"  const tabId = tabs[0].id",
 
-        @"browser.test.notifyPass()"
+        @"  const response = await browser.test.assertSafeResolve(() => browser.tabs.sendMessage(tabId, { content: 'Hello' }))",
+        @"  browser.test.assertEq(response?.content, 'Received', 'Should get the response from the content script')",
+
+        @"  browser.test.notifyPass()",
+        @"})"
     ]);
 
     auto *contentScript = Util::constructScript(@[
@@ -1213,7 +1316,62 @@ TEST(WKWebExtensionAPITabs, SendMessageWithPromiseReply)
         @"  browser.test.assertEq(sender.frameId, undefined, 'sender.frameId should be undefined')",
 
         @"  return Promise.resolve({ content: 'Received' })",
+        @"})",
+
+        @"setTimeout(() => browser.runtime.sendMessage('Ready'), 1000)"
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsContentScriptManifest resources:@{ @"background.js": backgroundScript, @"content.js": contentScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    auto *urlRequest = server.requestWithLocalhost();
+    [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forURL:urlRequest.URL];
+    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
+
+    [manager loadAndRun];
+}
+
+TEST(WKWebExtensionAPITabs, SendMessageWithAsyncPromiseReply)
+{
+    TestWebKitAPI::HTTPServer server({
+        { "/"_s, { { { "Content-Type"_s, "text/html"_s } }, ""_s } },
+    }, TestWebKitAPI::HTTPServer::Protocol::Http);
+
+    auto *backgroundScript = Util::constructScript(@[
+        @"browser.runtime.onMessage.addListener(async (message, sender) => {",
+        @"  browser.test.assertEq(message, 'Ready')",
+
+        @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
+        @"  const tabId = tabs[0].id",
+
+        @"  const response = await browser.test.assertSafeResolve(() => browser.tabs.sendMessage(tabId, { content: 'Hello' }))",
+        @"  browser.test.assertEq(response?.content, 'Received', 'Should get the response from the content script')",
+
+        @"  browser.test.notifyPass()",
         @"})"
+    ]);
+
+    auto *contentScript = Util::constructScript(@[
+        @"browser.runtime.onMessage.addListener((message, sender) => {",
+        @"  browser.test.assertEq(message.content, 'Hello', 'Should receive the correct message content')",
+
+        @"  browser.test.assertEq(typeof sender, 'object', 'sender should be an object')",
+
+        @"  browser.test.assertEq(typeof sender.url, 'string', 'sender.url should be a string')",
+        @"  browser.test.assertEq(typeof sender.origin, 'string', 'sender.origin should be a string')",
+
+        @"  browser.test.assertTrue(sender.url.startsWith('webkit-extension://'), 'sender.url should start with webkit-extension://')",
+        @"  browser.test.assertTrue(sender.origin.startsWith('webkit-extension://'), 'sender.origin should start with webkit-extension://')",
+
+        @"  browser.test.assertEq(sender.tab, undefined, 'sender.tab should be undefined')",
+        @"  browser.test.assertEq(sender.frameId, undefined, 'sender.frameId should be undefined')",
+
+        @"  return new Promise((resolve) => {",
+        @"    setTimeout(() => resolve({ content: 'Received' }), 1000)",
+        @"  })",
+        @"})",
+
+        @"setTimeout(() => browser.runtime.sendMessage('Ready'), 1000)"
     ]);
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsContentScriptManifest resources:@{ @"background.js": backgroundScript, @"content.js": contentScript }]);
@@ -1233,13 +1391,15 @@ TEST(WKWebExtensionAPITabs, SendMessageWithoutReply)
     }, TestWebKitAPI::HTTPServer::Protocol::Http);
 
     auto *backgroundScript = Util::constructScript(@[
-        @"const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
-        @"const tabId = tabs[0].id",
+        @"browser.runtime.onMessage.addListener(async (message, sender) => {",
+        @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
+        @"  const tabId = tabs[0].id",
 
-        @"const response = await browser.tabs.sendMessage(tabId, { content: 'Hello' })",
-        @"browser.test.assertEq(response, undefined, 'Should resolve with undefined as there was no reply')",
+        @"  const response = await browser.tabs.sendMessage(tabId, { content: 'Hello' })",
+        @"  browser.test.assertEq(response, undefined, 'Should resolve with undefined as there was no reply')",
 
-        @"browser.test.notifyPass()"
+        @"  browser.test.notifyPass()",
+        @"})"
     ]);
 
     auto *contentScript = Util::constructScript(@[
@@ -1256,7 +1416,11 @@ TEST(WKWebExtensionAPITabs, SendMessageWithoutReply)
 
         @"  browser.test.assertEq(sender.tab, undefined, 'sender.tab should be undefined')",
         @"  browser.test.assertEq(sender.frameId, undefined, 'sender.frameId should be undefined')",
-        @"})"
+
+        @"  return false",
+        @"})",
+
+        @"setTimeout(() => browser.runtime.sendMessage('Ready'), 1000)"
     ]);
 
     auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsContentScriptManifest resources:@{ @"background.js": backgroundScript, @"content.js": contentScript }]);
@@ -1277,7 +1441,7 @@ TEST(WKWebExtensionAPITabs, Connect)
 
     auto *backgroundScript = Util::constructScript(@[
         @"browser.runtime.onMessage.addListener(async (message, sender) => {",
-        @"  browser.test.assertEq(message.readyToConnect, true, 'Should be ready to connect')",
+        @"  browser.test.assertEq(message?.readyToConnect, true, 'Should be ready to connect')",
 
         @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
         @"  const tabId = tabs[0].id",
@@ -1335,7 +1499,7 @@ TEST(WKWebExtensionAPITabs, PortDisconnect)
 
     auto *backgroundScript = Util::constructScript(@[
         @"browser.runtime.onMessage.addListener(async (message, sender) => {",
-        @"  browser.test.assertEq(message.readyToConnect, true, 'Should be ready to connect')",
+        @"  browser.test.assertEq(message?.readyToConnect, true, 'Should be ready to connect')",
 
         @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
         @"  const tabId = tabs[0].id",
@@ -1386,7 +1550,7 @@ TEST(WKWebExtensionAPITabs, ConnectWithMultipleListeners)
 
     auto *backgroundScript = Util::constructScript(@[
         @"browser.runtime.onMessage.addListener(async (message, sender) => {",
-        @"  browser.test.assertEq(message.readyToConnect, true, 'Should be ready to connect')",
+        @"  browser.test.assertEq(message?.readyToConnect, true, 'Should be ready to connect')",
 
         @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
         @"  const tabId = tabs[0].id",
@@ -1451,7 +1615,7 @@ TEST(WKWebExtensionAPITabs, PortDisconnectWithMultipleListeners)
 
     auto *backgroundScript = Util::constructScript(@[
         @"browser.runtime.onMessage.addListener(async (message, sender) => {",
-        @"  browser.test.assertEq(message.readyToConnect, true, 'Should be ready to connect')",
+        @"  browser.test.assertEq(message?.readyToConnect, true, 'Should be ready to connect')",
 
         @"  const tabs = await browser.tabs.query({ active: true, currentWindow: true })",
         @"  const tabId = tabs[0].id",
@@ -1514,7 +1678,7 @@ TEST(WKWebExtensionAPITabs, ExecuteScript)
         @"const tabId = tabs[0].id",
 
         @"browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {",
-        @"  if (changeInfo.url) {",
+        @"  if (tab.status === 'complete') {",
         @"    let results = await browser.tabs.executeScript(tabId, { allFrames: false, file: 'executeScript.js' })",
         @"    browser.test.assertEq(results[0], 'pink')",
 
@@ -1542,6 +1706,46 @@ TEST(WKWebExtensionAPITabs, ExecuteScript)
     auto *url = urlRequest.URL;
     auto *matchPattern = [_WKWebExtensionMatchPattern matchPatternWithScheme:url.scheme host:url.host path:@"/*"];
     [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forMatchPattern:matchPattern];
+
+    [manager loadAndRun];
+
+    EXPECT_NS_EQUAL(manager.get().yieldMessage, @"Load Tab");
+
+    [manager.get().defaultTab.mainWebView loadRequest:urlRequest];
+
+    [manager run];
+}
+
+TEST(WKWebExtensionAPITabs, ExecuteScriptJSONTypes)
+{
+    TestWebKitAPI::HTTPServer server({
+        { "/"_s, { { { "Content-Type"_s, "text/html"_s } }, ""_s } }
+    }, TestWebKitAPI::HTTPServer::Protocol::Http);
+
+    auto *backgroundScript = Util::constructScript(@[
+        @"browser.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {",
+        @"  if (tab.status === 'complete') {",
+        @"    const expectedResult = { 'boolean': true, 'number': 42, 'string': 'Test String', 'object': { 'key': 'value' }, 'array': [1, 2, 3] };",
+
+        @"    function returnJSONTypes() {",
+        @"      return { 'boolean': true, 'number': 42, 'string': 'Test String', 'object': { 'key': 'value' }, 'array': [1, 2, 3] };",
+        @"    }",
+
+        @"    const results = await browser.tabs.executeScript(tabId, { code: '(' + returnJSONTypes + ')()' });",
+        @"    browser.test.assertDeepEq(results?.[0], expectedResult);",
+
+        @"    browser.test.notifyPass()",
+        @"  }",
+        @"})",
+
+        @"browser.test.yield('Load Tab')",
+    ]);
+
+    auto extension = adoptNS([[_WKWebExtension alloc] _initWithManifestDictionary:tabsManifestV2 resources:@{ @"background.js": backgroundScript }]);
+    auto manager = adoptNS([[TestWebExtensionManager alloc] initForExtension:extension.get()]);
+
+    auto *urlRequest = server.requestWithLocalhost();
+    [manager.get().context setPermissionStatus:_WKWebExtensionContextPermissionStatusGrantedExplicitly forURL:urlRequest.URL];
 
     [manager loadAndRun];
 

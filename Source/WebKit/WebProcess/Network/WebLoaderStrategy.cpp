@@ -332,10 +332,7 @@ static void addParametersShared(const LocalFrame* frame, NetworkResourceLoadPara
     // WebLocalFrameLoaderClient::applyToDocumentLoader stored the value on. Otherwise, we need to get the
     // value from the main frame's current DocumentLoader.
 
-    RefPtr mainFrame = dynamicDowncast<LocalFrame>(frame->mainFrame());
-    if (!mainFrame)
-        return;
-
+    Ref mainFrame = frame->mainFrame();
     RefPtr policySourceDocumentLoader = policySourceDocumentLoaderForFrame(*frame, isMainFrameNavigation);
 
     parameters.allowPrivacyProxy = policySourceDocumentLoader ? policySourceDocumentLoader->allowPrivacyProxy() : true;
@@ -415,13 +412,11 @@ void WebLoaderStrategy::scheduleLoadFromNetworkProcess(ResourceLoader& resourceL
     bool isMainFrameNavigation = resourceLoader.frame() && resourceLoader.frame()->isMainFrame() && resourceLoader.options().mode == FetchOptions::Mode::Navigate;
     addParametersShared(frame, loadParameters, isMainFrameNavigation);
 
-#if ENABLE(SERVICE_WORKER)
     loadParameters.serviceWorkersMode = resourceLoader.options().loadedFromOpaqueSource == LoadedFromOpaqueSource::No ? resourceLoader.options().serviceWorkersMode : ServiceWorkersMode::None;
     loadParameters.serviceWorkerRegistrationIdentifier = resourceLoader.options().serviceWorkerRegistrationIdentifier;
     loadParameters.httpHeadersToKeep = resourceLoader.options().httpHeadersToKeep;
     if (resourceLoader.options().navigationPreloadIdentifier)
         loadParameters.navigationPreloadIdentifier = resourceLoader.options().navigationPreloadIdentifier;
-#endif
 
     auto* document = frame ? frame->document() : nullptr;
     if (resourceLoader.options().cspResponseHeaders)
@@ -518,10 +513,10 @@ void WebLoaderStrategy::scheduleLoadFromNetworkProcess(ResourceLoader& resourceL
     if (resourceLoader.options().mode == FetchOptions::Mode::Navigate) {
         Vector<RefPtr<SecurityOrigin>> frameAncestorOrigins;
         for (auto* frame = resourceLoader.frame()->tree().parent(); frame; frame = frame->tree().parent()) {
-            auto* localFrame = dynamicDowncast<LocalFrame>(frame);
-            if (!localFrame)
-                continue;
-            frameAncestorOrigins.append(&localFrame->document()->securityOrigin());
+            if (auto* localFrame = dynamicDowncast<LocalFrame>(frame))
+                frameAncestorOrigins.append(&localFrame->document()->securityOrigin());
+            else
+                frameAncestorOrigins.append(nullptr);
         }
         loadParameters.frameAncestorOrigins = WTFMove(frameAncestorOrigins);
     }
@@ -568,7 +563,7 @@ void WebLoaderStrategy::startLocalLoad(WebCore::ResourceLoader& resourceLoader)
 
 void WebLoaderStrategy::addURLSchemeTaskProxy(WebURLSchemeTaskProxy& task)
 {
-    auto result = m_urlSchemeTasks.add(task.identifier(), &task);
+    auto result = m_urlSchemeTasks.add(task.identifier(), task);
     ASSERT_UNUSED(result, result.isNewEntry);
 }
 
@@ -781,7 +776,7 @@ void WebLoaderStrategy::loadResourceSynchronously(FrameLoader& frameLoader, WebC
 
     auto sendResult = WebProcess::singleton().ensureNetworkProcessConnection().connection().sendSync(Messages::NetworkConnectionToWebProcess::PerformSynchronousLoad(loadParameters), 0);
     if (!sendResult.succeeded()) {
-        WEBLOADERSTRATEGY_WITH_FRAMELOADER_RELEASE_LOG_ERROR("loadResourceSynchronously: failed sending synchronous network process message %" PUBLIC_LOG_STRING, IPC::errorAsString(sendResult.error));
+        WEBLOADERSTRATEGY_WITH_FRAMELOADER_RELEASE_LOG_ERROR("loadResourceSynchronously: failed sending synchronous network process message %" PUBLIC_LOG_STRING, IPC::errorAsString(sendResult.error()));
         if (page)
             page->diagnosticLoggingClient().logDiagnosticMessage(WebCore::DiagnosticLoggingKeys::internalErrorKey(), WebCore::DiagnosticLoggingKeys::synchronousMessageFailedKey(), WebCore::ShouldSample::No);
         response = ResourceResponse();

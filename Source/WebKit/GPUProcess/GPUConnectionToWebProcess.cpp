@@ -220,6 +220,13 @@ private:
     }
 #endif
 
+#if ENABLE(EXTENSION_CAPABILITIES)
+    void setCurrentMediaEnvironment(WebCore::PageIdentifier pageIdentifier) final
+    {
+        WebCore::RealtimeMediaSourceCenter::singleton().setCurrentMediaEnvironment(m_process.mediaEnvironment(pageIdentifier));
+    }
+#endif
+
     void startProducingData(CaptureDevice::DeviceType type) final
     {
         if (type == CaptureDevice::DeviceType::Microphone)
@@ -269,7 +276,7 @@ GPUConnectionToWebProcess::GPUConnectionToWebProcess(GPUProcess& gpuProcess, Web
     , m_libWebRTCCodecsProxy(LibWebRTCCodecsProxy::create(*this))
 #endif
 #if HAVE(AUDIT_TOKEN)
-    , m_presentingApplicationAuditToken(WTFMove(parameters.presentingApplicationAuditToken))
+    , m_presentingApplicationAuditToken(parameters.presentingApplicationAuditToken ? std::optional(parameters.presentingApplicationAuditToken->auditToken()) : std::nullopt)
 #endif
     , m_isLockdownModeEnabled(parameters.isLockdownModeEnabled)
 #if ENABLE(ROUTING_ARBITRATION) && HAVE(AVAUDIO_ROUTING_ARBITER)
@@ -597,7 +604,11 @@ RemoteImageDecoderAVFProxy& GPUConnectionToWebProcess::imageDecoderAVFProxy()
 
 void GPUConnectionToWebProcess::createRenderingBackend(RemoteRenderingBackendCreationParameters&& creationParameters, IPC::StreamServerConnection::Handle&& connectionHandle)
 {
-    auto streamConnection = IPC::StreamServerConnection::tryCreate(WTFMove(connectionHandle));
+    IPC::StreamServerConnectionParameters params;
+#if ENABLE(IPC_TESTING_API)
+    params.ignoreInvalidMessageForTesting = connection().ignoreInvalidMessageForTesting();
+#endif
+    auto streamConnection = IPC::StreamServerConnection::tryCreate(WTFMove(connectionHandle), params);
     MESSAGE_CHECK(streamConnection);
 
     auto addResult = m_remoteRenderingBackendMap.ensure(creationParameters.identifier, [&, streamConnection = WTFMove(streamConnection)] () mutable {
@@ -628,7 +639,11 @@ void GPUConnectionToWebProcess::createGraphicsContextGL(WebCore::GraphicsContext
         return;
     auto* renderingBackend = it->value.get();
 
-    auto streamConnection = IPC::StreamServerConnection::tryCreate(WTFMove(connectionHandle));
+    IPC::StreamServerConnectionParameters params;
+#if ENABLE(IPC_TESTING_API)
+    params.ignoreInvalidMessageForTesting = connection().ignoreInvalidMessageForTesting();
+#endif
+    auto streamConnection = IPC::StreamServerConnection::tryCreate(WTFMove(connectionHandle), params);
     MESSAGE_CHECK(streamConnection);
 
     auto addResult = m_remoteGraphicsContextGLMap.ensure(graphicsContextGLIdentifier, [&, streamConnection = WTFMove(streamConnection)] () mutable {
@@ -679,7 +694,11 @@ void GPUConnectionToWebProcess::createRemoteGPU(WebGPUIdentifier identifier, Ren
         return;
     auto* renderingBackend = it->value.get();
 
-    auto streamConnection = IPC::StreamServerConnection::tryCreate(WTFMove(connectionHandle));
+    IPC::StreamServerConnectionParameters params;
+#if ENABLE(IPC_TESTING_API)
+    params.ignoreInvalidMessageForTesting = connection().ignoreInvalidMessageForTesting();
+#endif
+    auto streamConnection = IPC::StreamServerConnection::tryCreate(WTFMove(connectionHandle), params);
     MESSAGE_CHECK(streamConnection);
 
     auto addResult = m_remoteGPUMap.ensure(identifier, [&, streamConnection = WTFMove(streamConnection)] () mutable {

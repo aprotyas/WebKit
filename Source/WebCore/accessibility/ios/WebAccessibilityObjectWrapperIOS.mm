@@ -902,6 +902,9 @@ static AccessibilityObjectWrapper *ancestorWithRole(const AXCoreObject& descenda
         break;
     }
 
+    if ([self accessibilityIsInNonNativeTextControl])
+        traits |= [self _accessibilityTextEntryTraits];
+
     if (self.axBackingObject->isAttachmentElement())
         traits |= [self _axUpdatesFrequentlyTrait];
     
@@ -995,6 +998,9 @@ static AccessibilityObjectWrapper *ancestorWithRole(const AXCoreObject& descenda
     case AccessibilityRole::Video:
         return [self accessibilityIsWebInteractiveVideo];
         
+    if (self.axBackingObject->isNonNativeTextControl())
+        return true;
+
     // Links can sometimes be elements (when they only contain static text or don't contain anything).
     // They should not be elements when containing text and other types.
     case AccessibilityRole::WebCoreLink:
@@ -1111,6 +1117,7 @@ static AccessibilityObjectWrapper *ancestorWithRole(const AXCoreObject& descenda
             && [self accessibilityElementCount] == 0
             && self.axBackingObject->descriptionAttributeValue().find(deprecatedIsNotSpaceOrNewline) != notFound;
     case AccessibilityRole::Ignored:
+    case AccessibilityRole::LineBreak:
     case AccessibilityRole::Presentational:
     case AccessibilityRole::Unknown:
         return false;
@@ -1246,16 +1253,16 @@ static void appendStringToResult(NSMutableString *result, NSString *string)
         }
     }
 
-    // iOS doesn't distinguish between a title and description field,
-    // so concatentation will yield the best result.
-    NSString *axTitle = backingObject->titleAttributeValue();
-    NSString *axDescription = backingObject->descriptionAttributeValue();
+    // iOS doesn't distinguish between the title and description properties,
+    // so concatenate them when different.
+    String title = backingObject->titleAttributeValue();
+    String description = backingObject->descriptionAttributeValue();
     NSString *landmarkDescription = [self ariaLandmarkRoleDescription];
     NSString *interactiveVideoDescription = [self interactiveVideoDescription];
 
     // We should expose the value of the input type date or time through AXValue instead of AXTitle.
-    if (backingObject->isInputTypePopupButton() && [axTitle isEqualToString:[self accessibilityValue]])
-        axTitle = nil;
+    if (backingObject->isInputTypePopupButton() && title == String([self accessibilityValue]))
+        title = ""_s;
 
     // Footer is not considered a landmark, but we want the role description.
     if (backingObject->roleValue() == AccessibilityRole::Footer)
@@ -1265,8 +1272,9 @@ static void appendStringToResult(NSMutableString *result, NSString *string)
     if (backingObject->roleValue() == AccessibilityRole::HorizontalRule)
         appendStringToResult(result, AXHorizontalRuleDescriptionText());
 
-    appendStringToResult(result, axTitle);
-    appendStringToResult(result, axDescription);
+    appendStringToResult(result, title);
+    if (description != title)
+        appendStringToResult(result, description);
     if ([self stringValueShouldBeUsedInLabel]) {
         NSString *valueLabel = backingObject->stringValue();
         valueLabel = [valueLabel stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
@@ -2152,6 +2160,9 @@ static RenderObject* rendererForView(WAKView* view)
 
 - (void)_accessibilitySetFocus:(BOOL)focus
 {
+    if (![self _prepareAccessibilityCall])
+        return;
+
     if (auto* backingObject = self.axBackingObject)
         backingObject->setFocused(focus);
 }
@@ -2748,6 +2759,13 @@ static RenderObject* rendererForView(WAKView* view)
     return Accessibility::findAncestor(*self.axBackingObject, false, [] (const auto& object) {
         return object.roleValue() == AccessibilityRole::Deletion;
     }) != nullptr;
+}
+
+- (BOOL)accessibilityIsInNonNativeTextControl
+{
+    return !!Accessibility::findAncestor(*self.axBackingObject, true, [] (const auto& object) {
+        return object.isNonNativeTextControl();
+    });
 }
 
 - (BOOL)accessibilityIsFirstItemInSuggestion

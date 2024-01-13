@@ -28,6 +28,7 @@
 
 #import "AccessibilitySupportSPI.h"
 #import "ArgumentCodersCocoa.h"
+#import "CoreIPCAuditToken.h"
 #import "DefaultWebBrowserChecks.h"
 #import "LegacyCustomProtocolManager.h"
 #import "LogInitialization.h"
@@ -42,7 +43,6 @@
 #import "WKAPICast.h"
 #import "WKBrowsingContextHandleInternal.h"
 #import "WKFullKeyboardAccessWatcher.h"
-#import "WKTypeRefWrapper.h"
 #import "WKWebProcessPlugInBrowserContextControllerInternal.h"
 #import "WebFrame.h"
 #import "WebInspector.h"
@@ -179,6 +179,12 @@
 #import <pal/cocoa/AVFoundationSoftLink.h>
 #import <pal/cocoa/DataDetectorsCoreSoftLink.h>
 #import <pal/cocoa/MediaToolboxSoftLink.h>
+
+#if PLATFORM(IOS_FAMILY)
+@interface NSObject (UIAccessibilitySafeCategory)
+- (id)safeValueForKey:(NSString *)key;
+@end
+#endif
 
 #if HAVE(CATALYST_USER_INTERFACE_IDIOM_AND_SCALE_FACTOR)
 // FIXME: This is only for binary compatibility with versions of UIKit in macOS 11 that are missing the change in <rdar://problem/68524148>.
@@ -325,6 +331,11 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
 {
     WEBPROCESS_RELEASE_LOG(Process, "WebProcess::platformInitializeWebProcess");
 
+#if USE(EXTENSIONKIT)
+    // Workaround for crash seen when running tests. See rdar://118186487.
+    unsetenv("BSServiceDomains");
+#endif
+
     applyProcessCreationParameters(parameters.auxiliaryProcessParameters);
 
     setQOS(parameters.latencyQOS, parameters.throughputQOS);
@@ -441,7 +452,7 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
     method_setImplementation(method, (IMP)preventAppKitFromContactingLaunchServices);
 #endif
 
-#if PLATFORM(MAC) && ENABLE(WEBPROCESS_NSRUNLOOP)
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
     if (parameters.launchServicesExtensionHandle) {
         if ((m_launchServicesExtension = SandboxExtension::create(WTFMove(*parameters.launchServicesExtensionHandle)))) {
             bool ok = m_launchServicesExtension->consume();
@@ -451,7 +462,12 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
 
     // Register the application. This will also check in with Launch Services.
     _RegisterApplication(nullptr, nullptr);
-    
+#if PLATFORM(MACCATALYST)
+    revokeLaunchServicesSandboxExtension();
+#endif
+#endif
+
+#if PLATFORM(MAC)
     // Update process name while holding the Launch Services sandbox extension
     updateProcessName(IsInProcessInitialization::Yes);
 
@@ -523,7 +539,7 @@ void WebProcess::platformInitializeWebProcess(WebProcessCreationParameters& para
 
     WebCore::sleepDisablerClient() = makeUnique<WebSleepDisablerClient>();
 
-#if HAVE(FIG_PHOTO_DECOMPRESSION_SET_HARDWARE_CUTOFF) && !ENABLE(HARDWARE_JPEG)
+#if PLATFORM(MAC) && !ENABLE(HARDWARE_JPEG)
     if (PAL::isMediaToolboxFrameworkAvailable() && PAL::canLoad_MediaToolbox_FigPhotoDecompressionSetHardwareCutoff())
         PAL::softLinkMediaToolboxFigPhotoDecompressionSetHardwareCutoff(kPALFigPhotoContainerFormat_JFIF, INT_MAX);
 #endif
@@ -561,7 +577,9 @@ void WebProcess::platformSetWebsiteDataStoreParameters(WebProcessDataStoreParame
 {
 #if ENABLE(SANDBOX_EXTENSIONS)
     SandboxExtension::consumePermanently(parameters.applicationCacheDirectoryExtensionHandle);
+#if !ENABLE(GPU_PROCESS)
     SandboxExtension::consumePermanently(parameters.mediaCacheDirectoryExtensionHandle);
+#endif
     SandboxExtension::consumePermanently(parameters.mediaKeyStorageDirectoryExtensionHandle);
     SandboxExtension::consumePermanently(parameters.javaScriptConfigurationDirectoryExtensionHandle);
 #if ENABLE(ARKIT_INLINE_PREVIEW)
@@ -672,6 +690,15 @@ static NSString *webProcessLoaderAccessibilityBundlePath()
 #endif
     return [path stringByAppendingPathComponent:@"System/Library/AccessibilityBundles/WebProcessLoader.axbundle"];
 }
+
+static NSString *webProcessAccessibilityBundlePath()
+{
+    NSString *path = (__bridge NSString *)GSSystemRootDirectory();
+#if PLATFORM(MACCATALYST)
+    path = [path stringByAppendingPathComponent:@"System/iOSSupport"];
+#endif
+    return [path stringByAppendingPathComponent:@"System/Library/AccessibilityBundles/WebProcess.axbundle"];
+}
 #endif
 
 static void registerWithAccessibility()
@@ -685,6 +712,18 @@ static void registerWithAccessibility()
     NSError *error = nil;
     if (![[NSBundle bundleWithPath:bundlePath] loadAndReturnError:&error])
         LOG_ERROR("Failed to load accessibility bundle at %@: %@", bundlePath, error);
+
+#if !PLATFORM(MACCATALYST)
+    // This code will eagerly start the in-process AX server.
+    // This enables us to revoke the Mach bootstrap sandbox extension.
+    NSString *webProcessAXBundlePath = webProcessAccessibilityBundlePath();
+    NSBundle *bundle = [NSBundle bundleWithPath:webProcessAXBundlePath];
+    error = nil;
+    if ([bundle loadAndReturnError:&error])
+        [[bundle principalClass] safeValueForKey:@"accessibilityInitializeBundle"];
+    else
+        LOG_ERROR("Failed to load accessibility bundle at %@: %@", webProcessAXBundlePath, error);
+#endif // !PLATFORM(MACCATALYST)
 #endif
 }
 
@@ -834,14 +873,12 @@ void WebProcess::platformInitializeProcess(const AuxiliaryProcessInitializationP
 
     if (parameters.extraInitializationData.get<HashTranslatorASCIILiteral>("inspector-process"_s) == "1"_s)
         m_processType = ProcessType::Inspector;
-#if ENABLE(SERVICE_WORKER)
     else if (parameters.extraInitializationData.get<HashTranslatorASCIILiteral>("service-worker-process"_s) == "1"_s) {
         m_processType = ProcessType::ServiceWorker;
 #if PLATFORM(MAC)
         m_registrableDomain = RegistrableDomain::uncheckedCreateFromRegistrableDomainString(parameters.extraInitializationData.get<HashTranslatorASCIILiteral>("registrable-domain"_s));
 #endif
     }
-#endif
     else if (parameters.extraInitializationData.get<HashTranslatorASCIILiteral>("is-prewarmed"_s) == "1"_s)
         m_processType = ProcessType::PrewarmedWebContent;
     else
@@ -908,26 +945,13 @@ void WebProcess::initializeSandbox(const AuxiliaryProcessInitializationParameter
 
 static NSURL *origin(WebPage& page)
 {
-    Ref mainFrame = page.mainWebFrame();
-
-    URL mainFrameURL = mainFrame->url();
-    Ref<SecurityOrigin> mainFrameOrigin = SecurityOrigin::create(mainFrameURL);
-    String mainFrameOriginString;
-    if (!mainFrameOrigin->isOpaque())
-        mainFrameOriginString = mainFrameOrigin->toRawString();
-    else
-        mainFrameOriginString = makeString(mainFrameURL.protocol(), ':'); // toRawString() is not supposed to work with opaque origins, and would just return "://".
-
+    auto rootFrameOriginString = page.rootFrameOriginString();
     // +[NSURL URLWithString:] returns nil when its argument is malformed. It's unclear when we would have a malformed URL here,
     // but it happens in practice according to <rdar://problem/14173389>. Leaving an assertion in to catch a reproducible case.
-    ASSERT([NSURL URLWithString:mainFrameOriginString]);
-
-    return [NSURL URLWithString:mainFrameOriginString];
+    ASSERT([NSURL URLWithString:rootFrameOriginString]);
+    return [NSURL URLWithString:rootFrameOriginString];
 }
 
-#endif
-
-#if PLATFORM(MAC)
 static Vector<String> activePagesOrigins(const HashMap<PageIdentifier, RefPtr<WebPage>>& pageMap)
 {
     Vector<String> origins;
@@ -1050,11 +1074,6 @@ RefPtr<ObjCObjectGraph> WebProcess::transformHandlesToObjects(ObjCObjectGraph& o
         {
             if (dynamic_objc_cast<WKBrowsingContextHandle>(object))
                 return true;
-
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-            if (dynamic_objc_cast<WKTypeRefWrapper>(object))
-                return true;
-ALLOW_DEPRECATED_DECLARATIONS_END
             return false;
         }
 
@@ -1066,14 +1085,6 @@ ALLOW_DEPRECATED_DECLARATIONS_END
 
                 return [NSNull null];
             }
-
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-            if (auto* wrapper = dynamic_objc_cast<WKTypeRefWrapper>(object)) {
-                RefPtr impl = toImpl(wrapper.object);
-                return adoptNS([[WKTypeRefWrapper alloc] initWithObject:toAPI(WebProcess::singleton().transformHandlesToObjects(impl.get()).get())]);
-            }
-
-ALLOW_DEPRECATED_DECLARATIONS_END
             return object;
         }
     };
@@ -1088,11 +1099,6 @@ RefPtr<ObjCObjectGraph> WebProcess::transformObjectsToHandles(ObjCObjectGraph& o
         {
             if (dynamic_objc_cast<WKWebProcessPlugInBrowserContextController>(object))
                 return true;
-
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-            if (dynamic_objc_cast<WKTypeRefWrapper>(object))
-                return true;
-ALLOW_DEPRECATED_DECLARATIONS_END
             return false;
         }
 
@@ -1100,13 +1106,6 @@ ALLOW_DEPRECATED_DECLARATIONS_END
         {
             if (auto* controller = dynamic_objc_cast<WKWebProcessPlugInBrowserContextController>(object))
                 return controller.handle;
-
-ALLOW_DEPRECATED_DECLARATIONS_BEGIN
-            if (auto* wrapper = dynamic_objc_cast<WKTypeRefWrapper>(object)) {
-                RefPtr impl = toImpl(wrapper.object);
-                return adoptNS([[WKTypeRefWrapper alloc] initWithObject:toAPI(transformObjectsToHandles(impl.get()).get())]);
-            }
-ALLOW_DEPRECATED_DECLARATIONS_END
             return object;
         }
     };
@@ -1424,13 +1423,18 @@ void WebProcess::updatePageScreenProperties()
 }
 #endif
 
-void WebProcess::unblockServicesRequiredByAccessibility(const Vector<SandboxExtension::Handle>& handleArray)
+void WebProcess::unblockServicesRequiredByAccessibility(Vector<SandboxExtension::Handle>&& handles)
 {
-#if PLATFORM(IOS_FAMILY)
-    bool consumed = SandboxExtension::consumePermanently(handleArray);
-    ASSERT_UNUSED(consumed, consumed);
-#endif
+    Vector<RefPtr<SandboxExtension>> extensions = WTF::map(WTFMove(handles), [](SandboxExtension::Handle&& handle) {
+        auto extension = SandboxExtension::create(WTFMove(handle));
+        extension->consume();
+        return extension;
+    });
+
     registerWithAccessibility();
+
+    for (auto& extension : extensions)
+        extension->revoke();
 }
 
 void WebProcess::powerSourceDidChange(bool hasAC)
@@ -1490,7 +1494,9 @@ void WebProcess::openDirectoryCacheInvalidated(SandboxExtension::Handle&& handle
     if (bootstrapExtension)
         bootstrapExtension->revoke();
 }
+#endif
 
+#if PLATFORM(MAC) || PLATFORM(MACCATALYST)
 void WebProcess::revokeLaunchServicesSandboxExtension()
 {
     if (m_launchServicesExtension) {

@@ -32,6 +32,7 @@ GPUProcess/graphics/ImageBufferShareableAllocator.cpp
 GPUProcess/graphics/RemoteDisplayListRecorder.cpp
 GPUProcess/graphics/RemoteGraphicsContextGL.cpp
 GPUProcess/graphics/RemoteImageBuffer.cpp
+GPUProcess/graphics/RemoteImageBufferSet.cpp
 GPUProcess/graphics/RemoteRenderingBackend.cpp
 GPUProcess/graphics/RemoteResourceCache.cpp
 GPUProcess/graphics/ScopedRenderingResourcesRequest.cpp
@@ -171,7 +172,6 @@ NetworkProcess/storage/IDBStorageManager.cpp
 NetworkProcess/storage/IDBStorageRegistry.cpp
 NetworkProcess/storage/LocalStorageManager.cpp
 NetworkProcess/storage/MemoryStorageArea.cpp
-NetworkProcess/storage/NetworkQuotaManager.cpp
 NetworkProcess/storage/NetworkStorageManager.cpp
 NetworkProcess/storage/OriginQuotaManager.cpp
 NetworkProcess/storage/OriginStorageManager.cpp
@@ -653,7 +653,6 @@ WebProcess/InjectedBundle/API/c/WKBundleBackForwardListItem.cpp
 WebProcess/InjectedBundle/API/c/WKBundleDOMWindowExtension.cpp
 WebProcess/InjectedBundle/API/c/WKBundleFrame.cpp
 WebProcess/InjectedBundle/API/c/WKBundleHitTestResult.cpp
-WebProcess/InjectedBundle/API/c/WKBundleInspector.cpp
 WebProcess/InjectedBundle/API/c/WKBundleNavigationAction.cpp
 WebProcess/InjectedBundle/API/c/WKBundleNodeHandle.cpp
 WebProcess/InjectedBundle/API/c/WKBundlePage.cpp
@@ -718,6 +717,7 @@ WebProcess/GPU/graphics/RemoteGraphicsContextGLProxy.cpp
 WebProcess/GPU/graphics/RemoteDisplayListRecorderProxy.cpp
 WebProcess/GPU/graphics/RemoteImageBufferProxy.cpp
 WebProcess/GPU/graphics/RemoteRenderingBackendProxy.cpp
+WebProcess/GPU/graphics/RemoteImageBufferSetProxy.cpp
 WebProcess/GPU/graphics/RemoteResourceCacheProxy.cpp
 WebProcess/GPU/media/AudioTrackPrivateRemote.cpp
 WebProcess/GPU/media/MediaPlayerPrivateRemote.cpp
@@ -761,6 +761,7 @@ WebProcess/Network/WebTransportReceiveStreamSource.cpp
 WebProcess/Network/WebTransportSendStreamSink.cpp
 WebProcess/Network/WebTransportSession.cpp
 
+WebProcess/Network/webrtc/LibWebRTCDnsResolverFactory.cpp
 WebProcess/Network/webrtc/LibWebRTCNetwork.cpp
 WebProcess/Network/webrtc/LibWebRTCNetworkManager.cpp
 WebProcess/Network/webrtc/LibWebRTCProvider.cpp

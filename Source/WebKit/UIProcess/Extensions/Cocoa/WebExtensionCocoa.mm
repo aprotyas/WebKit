@@ -36,6 +36,7 @@
 #import "CocoaHelpers.h"
 #import "FoundationSPI.h"
 #import "Logging.h"
+#import "WebExtensionConstants.h"
 #import "WebExtensionUtilities.h"
 #import "_WKWebExtensionInternal.h"
 #import "_WKWebExtensionLocalization.h"
@@ -140,9 +141,6 @@ static NSString * const declarativeNetRequestRuleEnabledManifestKey = @"enabled"
 static NSString * const declarativeNetRequestRulePathManifestKey = @"path";
 
 static const size_t maximumNumberOfShortcutCommands = 4;
-
-static const size_t maximumNumberOfDeclarativeNetRequestStaticRulesets = 100;
-static const size_t maximumNumberOfDeclarativeNetRequestEnabledStaticRulesets = 50;
 
 WebExtension::WebExtension(NSBundle *appExtensionBundle, NSError **outError)
     : m_bundle(appExtensionBundle)
@@ -1511,18 +1509,24 @@ void WebExtension::populateCommandsIfNeeded()
         commandData.activationKey = emptyString();
         commandData.modifierFlags = { };
 
-        if (!hasActionCommand) {
-            if (supportsManifestVersion(3) && commandData.identifier == "_execute_action"_s)
-                hasActionCommand = true;
-            else if (!supportsManifestVersion(3) && (commandData.identifier == "_execute_browser_action"_s || commandData.identifier == "_execute_page_action"_s))
-                hasActionCommand = true;
-        }
+        bool isActionCommand = false;
+        if (supportsManifestVersion(3) && commandData.identifier == "_execute_action"_s)
+            isActionCommand = true;
+        else if (!supportsManifestVersion(3) && (commandData.identifier == "_execute_browser_action"_s || commandData.identifier == "_execute_page_action"_s))
+            isActionCommand = true;
 
+        if (isActionCommand && !hasActionCommand)
+            hasActionCommand = true;
+
+        // Descriptions are required for standard commands, but are optional for action commands.
         auto *description = objectForKey<NSString>(commandDictionary, commandsDescriptionKeyManifestKey);
-        if (!description.length) {
+        if (!description.length && !isActionCommand) {
             error = WEB_UI_STRING("Empty or invalid `description` in the `commands` manifest entry.", "WKWebExtensionErrorInvalidManifestEntry description for invalid command description");
             continue;
         }
+
+        if (isActionCommand && !description.length)
+            description = displayActionLabel();
 
         commandData.description = description;
 
@@ -1686,7 +1690,7 @@ void WebExtension::populateDeclarativeNetRequestPropertiesIfNeeded()
         return;
     }
 
-    if (declarativeNetRequestRulesets.count > maximumNumberOfDeclarativeNetRequestStaticRulesets)
+    if (declarativeNetRequestRulesets.count > webExtensionDeclarativeNetRequestMaximumNumberOfStaticRulesets)
         recordError(createError(Error::InvalidDeclarativeNetRequest, WEB_UI_STRING("Exceeded maximum number of `declarative_net_request` rulesets. Ignoring extra rulesets.", "_WKWebExtensionErrorInvalidDeclarativeNetRequestEntry description for too many rulesets")));
 
     NSUInteger rulesetCount = 0;
@@ -1694,7 +1698,7 @@ void WebExtension::populateDeclarativeNetRequestPropertiesIfNeeded()
     bool recordedTooManyRulesetsManifestError = false;
     HashSet<String> seenRulesetIDs;
     for (NSDictionary *rulesetDictionary in declarativeNetRequestRulesets) {
-        if (rulesetCount >= maximumNumberOfDeclarativeNetRequestStaticRulesets)
+        if (rulesetCount >= webExtensionDeclarativeNetRequestMaximumNumberOfStaticRulesets)
             continue;
 
         NSError *error;
@@ -1710,8 +1714,8 @@ void WebExtension::populateDeclarativeNetRequestPropertiesIfNeeded()
             continue;
         }
 
-        if (ruleset.enabled && ++enabledRulesetCount > maximumNumberOfDeclarativeNetRequestEnabledStaticRulesets && !recordedTooManyRulesetsManifestError) {
-            recordError(createError(Error::InvalidDeclarativeNetRequest, WEB_UI_FORMAT_STRING("Exceeded maxmimum number of enabled `declarative_net_request` static rulesets. The first %lu will be applied, the remaining will be ignored.", "_WKWebExtensionErrorInvalidDeclarativeNetRequestEntry description for too many enabled static rulesets", maximumNumberOfDeclarativeNetRequestEnabledStaticRulesets)));
+        if (ruleset.enabled && ++enabledRulesetCount > webExtensionDeclarativeNetRequestMaximumNumberOfEnabledRulesets && !recordedTooManyRulesetsManifestError) {
+            recordError(createError(Error::InvalidDeclarativeNetRequest, WEB_UI_FORMAT_STRING("Exceeded maximum number of enabled `declarative_net_request` static rulesets. The first %lu will be applied, the remaining will be ignored.", "_WKWebExtensionErrorInvalidDeclarativeNetRequestEntry description for too many enabled static rulesets", webExtensionDeclarativeNetRequestMaximumNumberOfEnabledRulesets)));
             recordedTooManyRulesetsManifestError = true;
             continue;
         }
@@ -1723,7 +1727,7 @@ void WebExtension::populateDeclarativeNetRequestPropertiesIfNeeded()
     }
 }
 
-const WebExtension::DeclarativeNetRequestRulesetVector& WebExtension::declarativeNetRequestRulesets()
+WebExtension::DeclarativeNetRequestRulesetVector& WebExtension::declarativeNetRequestRulesets()
 {
     populateDeclarativeNetRequestPropertiesIfNeeded();
     return m_declarativeNetRequestRulesets;
@@ -1850,7 +1854,19 @@ void WebExtension::populateContentScriptPropertiesIfNeeded()
         else
             recordError(createError(Error::InvalidContentScripts, WEB_UI_STRING("Manifest `content_scripts` entry has unknown `run_at` value.", "WKWebExtensionErrorInvalidContentScripts description for unknown 'run_at' value")));
 
-        m_staticInjectedContents.append({ WTFMove(includeMatchPatterns), WTFMove(excludeMatchPatterns), injectionTime, matchesAboutBlank, injectsIntoAllFrames, false, scriptPaths, styleSheetPaths, includeGlobPatternStrings, excludeGlobPatternStrings });
+        InjectedContentData injectedContentData;
+        injectedContentData.includeMatchPatterns = WTFMove(includeMatchPatterns);
+        injectedContentData.excludeMatchPatterns = WTFMove(excludeMatchPatterns);
+        injectedContentData.injectionTime = injectionTime;
+        injectedContentData.matchesAboutBlank = matchesAboutBlank;
+        injectedContentData.injectsIntoAllFrames = injectsIntoAllFrames;
+        injectedContentData.forMainWorld = false;
+        injectedContentData.scriptPaths = scriptPaths;
+        injectedContentData.styleSheetPaths = styleSheetPaths;
+        injectedContentData.includeGlobPatternStrings = includeGlobPatternStrings;
+        injectedContentData.excludeGlobPatternStrings = excludeGlobPatternStrings;
+
+        m_staticInjectedContents.append(WTFMove(injectedContentData));
     };
 
     for (NSDictionary<NSString *, id> *contentScriptsManifestEntry in contentScriptsManifestArray)

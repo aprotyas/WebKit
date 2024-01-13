@@ -87,6 +87,7 @@ PluginInfo PDFPluginBase::pluginInfo()
 
 PDFPluginBase::PDFPluginBase(HTMLPlugInElement& element)
     : m_frame(*WebFrame::fromCoreFrame(*element.document().frame()))
+    , m_element(element)
     , m_identifier(PDFPluginIdentifier::generate())
 {
 }
@@ -147,6 +148,11 @@ bool PDFPluginBase::isFullFramePlugin() const
     if (!is<PluginDocument>(document))
         return false;
     return downcast<PluginDocument>(*document).pluginWidget() == m_view;
+}
+
+bool PDFPluginBase::handlesPageScaleFactor() const
+{
+    return m_frame && m_frame->isMainFrame() && isFullFramePlugin();
 }
 
 bool PDFPluginBase::isLocked() const
@@ -227,6 +233,15 @@ void PDFPluginBase::addArchiveResource()
     m_view->frame()->document()->loader()->addArchiveResource(resource.releaseNonNull());
 }
 
+void PDFPluginBase::tryRunScriptsInPDFDocument()
+{
+    if (!m_pdfDocument || !m_documentFinishedLoading || m_didRunScripts)
+        return;
+
+    PDFScriptEvaluator::runScripts([m_pdfDocument documentRef], *this);
+    m_didRunScripts = true;
+}
+
 void PDFPluginBase::geometryDidChange(const IntSize& pluginSize, const AffineTransform& pluginToRootViewTransform)
 {
     m_size = pluginSize;
@@ -243,7 +258,7 @@ void PDFPluginBase::visibilityDidChange(bool visible)
     if (!m_frame || !hudEnabled())
         return;
     if (visible)
-        m_frame->page()->createPDFHUD(*this, frameForHUD());
+        m_frame->page()->createPDFHUD(*this, frameForHUDInRootViewCoordinates());
     else
         m_frame->page()->removePDFHUD(*this);
 #endif
@@ -262,39 +277,19 @@ IntPoint PDFPluginBase::convertFromRootViewToPlugin(const IntPoint& point) const
     return m_rootViewToPluginTransform.mapPoint(point);
 }
 
-IntPoint PDFPluginBase::convertFromPluginToPDFView(const IntPoint& point) const
+IntRect PDFPluginBase::convertFromRootViewToPlugin(const IntRect& rect) const
 {
-    return IntPoint(point.x(), size().height() - point.y());
+    return m_rootViewToPluginTransform.mapRect(rect);
 }
 
-IntPoint PDFPluginBase::convertFromPDFViewToRootView(const IntPoint& point) const
+IntPoint PDFPluginBase::convertFromPluginToRootView(const IntPoint& point) const
 {
-    IntPoint pointInPluginCoordinates(point.x(), size().height() - point.y());
-    return valueOrDefault(m_rootViewToPluginTransform.inverse()).mapPoint(pointInPluginCoordinates);
+    return m_rootViewToPluginTransform.inverse()->mapPoint(point);
 }
 
-IntRect PDFPluginBase::convertFromPDFViewToRootView(const IntRect& rect) const
+IntRect PDFPluginBase::convertFromPluginToRootView(const IntRect& rect) const
 {
-    IntRect rectInPluginCoordinates(rect.x(), rect.y(), rect.width(), rect.height());
-    return valueOrDefault(m_rootViewToPluginTransform.inverse()).mapRect(rectInPluginCoordinates);
-}
-
-IntPoint PDFPluginBase::convertFromRootViewToPDFView(const IntPoint& point) const
-{
-    IntPoint pointInPluginCoordinates = m_rootViewToPluginTransform.mapPoint(point);
-    return IntPoint(pointInPluginCoordinates.x(), size().height() - pointInPluginCoordinates.y());
-}
-
-FloatRect PDFPluginBase::convertFromPDFViewToScreen(const FloatRect& rect) const
-{
-    return WebCore::Accessibility::retrieveValueFromMainThread<WebCore::FloatRect>([&] () -> WebCore::FloatRect {
-        FloatRect updatedRect = rect;
-        updatedRect.setLocation(convertFromPDFViewToRootView(IntPoint(updatedRect.location())));
-        CheckedPtr page = this->page();
-        if (!page)
-            return { };
-        return page->chrome().rootViewToScreen(enclosingIntRect(updatedRect));
-    });
+    return m_rootViewToPluginTransform.inverse()->mapRect(rect);
 }
 
 IntRect PDFPluginBase::boundsOnScreen() const
@@ -302,7 +297,7 @@ IntRect PDFPluginBase::boundsOnScreen() const
     return WebCore::Accessibility::retrieveValueFromMainThread<WebCore::IntRect>([&] () -> WebCore::IntRect {
         FloatRect bounds = FloatRect(FloatPoint(), size());
         FloatRect rectInRootViewCoordinates = valueOrDefault(m_rootViewToPluginTransform.inverse()).mapRect(bounds);
-        CheckedPtr page = this->page();
+        RefPtr page = this->page();
         if (!page)
             return { };
         return page->chrome().rootViewToScreen(enclosingIntRect(rectInRootViewCoordinates));
@@ -351,7 +346,7 @@ void PDFPluginBase::setScrollOffset(const ScrollOffset& offset)
 
 bool PDFPluginBase::isActive() const
 {
-    if (CheckedPtr page = this->page())
+    if (RefPtr page = this->page())
         return page->focusController().isActive();
 
     return false;
@@ -359,7 +354,7 @@ bool PDFPluginBase::isActive() const
 
 bool PDFPluginBase::forceUpdateScrollbarsOnMainThreadForPerformanceTesting() const
 {
-    if (CheckedPtr page = this->page())
+    if (RefPtr page = this->page())
         return page->settings().scrollingPerformanceTestingEnabled();
 
     return false;
@@ -387,7 +382,7 @@ ScrollPosition PDFPluginBase::maximumScrollPosition() const
 
 float PDFPluginBase::deviceScaleFactor() const
 {
-    if (CheckedPtr page = this->page())
+    if (RefPtr page = this->page())
         return page->deviceScaleFactor();
     return 1;
 }
@@ -454,6 +449,46 @@ void PDFPluginBase::willDetachRenderer()
         frameView->removeScrollableArea(this);
 }
 
+IntRect PDFPluginBase::viewRelativeVerticalScrollbarRect() const
+{
+    if (!m_verticalScrollbar)
+        return { };
+
+    auto scrollbarRect = IntRect({ }, size());
+    scrollbarRect.shiftXEdgeTo(scrollbarRect.maxX() - m_verticalScrollbar->width());
+
+    if (m_horizontalScrollbar)
+        scrollbarRect.contract(0, m_horizontalScrollbar->height());
+
+    return scrollbarRect;
+}
+
+IntRect PDFPluginBase::viewRelativeHorizontalScrollbarRect() const
+{
+    if (!m_horizontalScrollbar)
+        return { };
+
+    auto scrollbarRect = IntRect({ }, size());
+    scrollbarRect.shiftYEdgeTo(scrollbarRect.maxY() - m_horizontalScrollbar->height());
+
+    if (m_verticalScrollbar)
+        scrollbarRect.contract(m_verticalScrollbar->width(), 0);
+
+    return scrollbarRect;
+}
+
+IntRect PDFPluginBase::viewRelativeScrollCornerRect() const
+{
+    IntSize scrollbarSpace = scrollbarIntrusion();
+    if (scrollbarSpace.isEmpty())
+        return { };
+
+    auto cornerRect = IntRect({ }, size());
+    cornerRect.shiftXEdgeTo(cornerRect.maxX() - scrollbarSpace.width());
+    cornerRect.shiftYEdgeTo(cornerRect.maxY() - scrollbarSpace.height());
+    return cornerRect;
+}
+
 void PDFPluginBase::updateScrollbars()
 {
     if (m_hasBeenDestroyed)
@@ -474,24 +509,22 @@ void PDFPluginBase::updateScrollbars()
     } else if (m_size.height() < pdfDocumentSize.height())
         m_verticalScrollbar = createScrollbar(ScrollbarOrientation::Vertical);
 
-    IntSize scrollbarSpace = scrollbarIntrusion();
-
     if (m_horizontalScrollbar) {
-        m_horizontalScrollbar->setSteps(Scrollbar::pixelsPerLineStep(), firstPageHeight());
-        m_horizontalScrollbar->setProportion(m_size.width() - scrollbarSpace.width(), pdfDocumentSize.width());
-        IntRect scrollbarRect(m_view->x(), m_view->y() + m_size.height() - m_horizontalScrollbar->height(), m_size.width(), m_horizontalScrollbar->height());
-        if (m_verticalScrollbar)
-            scrollbarRect.contract(m_verticalScrollbar->width(), 0);
+        auto scrollbarRect = viewRelativeHorizontalScrollbarRect();
+        scrollbarRect.moveBy(m_view->location());
         m_horizontalScrollbar->setFrameRect(scrollbarRect);
+
+        m_horizontalScrollbar->setSteps(Scrollbar::pixelsPerLineStep(), firstPageHeight());
+        m_horizontalScrollbar->setProportion(scrollbarRect.width(), pdfDocumentSize.width());
     }
 
     if (m_verticalScrollbar) {
-        m_verticalScrollbar->setSteps(Scrollbar::pixelsPerLineStep(), firstPageHeight());
-        m_verticalScrollbar->setProportion(m_size.height() - scrollbarSpace.height(), pdfDocumentSize.height());
-        IntRect scrollbarRect(IntRect(m_view->x() + m_size.width() - m_verticalScrollbar->width(), m_view->y(), m_verticalScrollbar->width(), m_size.height()));
-        if (m_horizontalScrollbar)
-            scrollbarRect.contract(0, m_horizontalScrollbar->height());
+        auto scrollbarRect = viewRelativeVerticalScrollbarRect();
+        scrollbarRect.moveBy(m_view->location());
         m_verticalScrollbar->setFrameRect(scrollbarRect);
+
+        m_verticalScrollbar->setSteps(Scrollbar::pixelsPerLineStep(), firstPageHeight());
+        m_verticalScrollbar->setProportion(scrollbarRect.height(), pdfDocumentSize.height());
     }
 
     RefPtr frameView = m_frame ? m_frame->coreLocalFrame()->view() : nullptr;
@@ -514,7 +547,7 @@ Ref<Scrollbar> PDFPluginBase::createScrollbar(ScrollbarOrientation orientation)
     Ref widget = Scrollbar::createNativeScrollbar(*this, orientation, ScrollbarWidth::Auto);
     didAddScrollbar(widget.ptr(), orientation);
 
-    if (CheckedPtr page = this->page()) {
+    if (RefPtr page = this->page()) {
         if (page->isMonitoringWheelEvents())
             scrollAnimator().setWheelEventTestMonitor(page->wheelEventTestMonitor());
     }
@@ -538,23 +571,29 @@ void PDFPluginBase::destroyScrollbar(ScrollbarOrientation orientation)
     scrollbar = nullptr;
 }
 
+void PDFPluginBase::print()
+{
+    if (RefPtr page = this->page())
+        page->chrome().print(*m_frame->coreLocalFrame());
+}
+
 #if ENABLE(PDF_HUD)
 
 void PDFPluginBase::updatePDFHUDLocation()
 {
     if (isLocked() || !m_frame || !m_frame->page())
         return;
-    m_frame->protectedPage()->updatePDFHUDLocation(*this, frameForHUD());
+    m_frame->protectedPage()->updatePDFHUDLocation(*this, frameForHUDInRootViewCoordinates());
 }
 
-IntRect PDFPluginBase::frameForHUD() const
+IntRect PDFPluginBase::frameForHUDInRootViewCoordinates() const
 {
-    return convertFromPDFViewToRootView(IntRect(IntPoint(), size()));
+    return convertFromPluginToRootView(IntRect(IntPoint(), size()));
 }
 
 bool PDFPluginBase::hudEnabled() const
 {
-    if (CheckedPtr page = this->page())
+    if (RefPtr page = this->page())
         return page->settings().pdfPluginHUDEnabled();
     return false;
 }

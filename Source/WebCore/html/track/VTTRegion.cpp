@@ -40,7 +40,7 @@
 #include "HTMLDivElement.h"
 #include "Logging.h"
 #include "RenderElement.h"
-#include "ShadowPseudoIds.h"
+#include "UserAgentParts.h"
 #include "VTTCue.h"
 #include "VTTScanner.h"
 #include "WebVTTParser.h"
@@ -143,41 +143,43 @@ void VTTRegion::updateParametersFromRegion(const VTTRegion& other)
 
 void VTTRegion::setRegionSettings(const String& inputString)
 {
+    // https://w3c.github.io/webvtt/#region-settings-parsing
+    // 6.2. WebVTT region settings parsing
     m_settings = inputString;
     VTTScanner input(inputString);
 
     while (!input.isAtEnd()) {
-        input.skipWhile<isTabOrSpace>();
-        if (input.isAtEnd())
-            break;
+        // Step 1 - Split input on spaces.
+        input.skipWhile<isASCIIWhitespace<UChar>>();
+        VTTScanner::Run valueRun = input.collectUntil<isASCIIWhitespace<UChar>>();
+        auto settingValue = input.extractString(valueRun);
+        VTTScanner setting(settingValue);
 
-        // Scan the name part.
-        RegionSetting name = scanSettingName(input);
+        // Step 2.2 - Let name be the leading substring of setting up to and excluding the first U+003A COLON character (:) in that string.
+        RegionSetting name = scanSettingName(setting);
 
-        // Verify that we're looking at a ':'.
-        if (name == None || !input.scan(':')) {
-            input.skipUntil<isASCIIWhitespace<UChar>>();
+        // Step 2.1 - If the first ':' in setting is the last character of setting, then jump to the next setting.
+        if (name == None || setting.isAtEnd())
             continue;
-        }
 
-        // Scan the value part.
-        parseSettingValue(name, input);
+        // Steps 2.3-2.4 - Scan the value part.
+        parseSettingValue(name, setting);
     }
 }
 
 VTTRegion::RegionSetting VTTRegion::scanSettingName(VTTScanner& input)
 {
-    if (input.scan("id"))
+    if (input.scan("id:"))
         return Id;
-    if (input.scan("lines"))
+    if (input.scan("lines:"))
         return Lines;
-    if (input.scan("width"))
+    if (input.scan("width:"))
         return Width;
-    if (input.scan("viewportanchor"))
+    if (input.scan("viewportanchor:"))
         return ViewportAnchor;
-    if (input.scan("regionanchor"))
+    if (input.scan("regionanchor:"))
         return RegionAnchor;
-    if (input.scan("scroll"))
+    if (input.scan("scroll:"))
         return Scroll;
 
     return None;
@@ -312,7 +314,7 @@ HTMLDivElement& VTTRegion::getDisplayTree()
 {
     if (!m_regionDisplayTree) {
         m_regionDisplayTree = HTMLDivElement::create(downcast<Document>(*scriptExecutionContext()));
-        m_regionDisplayTree->setPseudo(ShadowPseudoIds::webkitMediaTextTrackRegion());
+        m_regionDisplayTree->setUserAgentPart(UserAgentParts::webkitMediaTextTrackRegion());
         m_recalculateStyles = true;
     }
 
@@ -335,7 +337,7 @@ void VTTRegion::prepareRegionDisplayTree()
     // gradually scrolled out as multiple cues are appended to the region.
     if (!m_cueContainer) {
         m_cueContainer = HTMLDivElement::create(downcast<Document>(*scriptExecutionContext()));
-        m_cueContainer->setPseudo(ShadowPseudoIds::webkitMediaTextTrackRegionContainer());
+        m_cueContainer->setUserAgentPart(UserAgentParts::webkitMediaTextTrackRegionContainer());
         m_regionDisplayTree->appendChild(*m_cueContainer);
     }
 

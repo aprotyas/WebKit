@@ -112,6 +112,8 @@ public:
         return adoptRef(*new ProcessLauncher(client, WTFMove(launchOptions)));
     }
 
+    virtual ~ProcessLauncher();
+
     bool isLaunching() const { return m_isLaunching; }
     ProcessID processID() const { return m_processID; }
 
@@ -130,6 +132,7 @@ private:
     void didFinishLaunchingProcess(ProcessID, IPC::Connection::Identifier);
 
     void platformInvalidate();
+    void platformDestroy();
 
 #if PLATFORM(COCOA)
     void terminateXPCConnection();

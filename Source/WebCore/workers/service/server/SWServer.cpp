@@ -26,8 +26,6 @@
 #include "config.h"
 #include "SWServer.h"
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "BackgroundFetchEngine.h"
 #include "BackgroundFetchInformation.h"
 #include "BackgroundFetchOptions.h"
@@ -50,6 +48,7 @@
 #include "WorkerFetchResult.h"
 #include <wtf/CallbackAggregator.h>
 #include <wtf/CompletionHandler.h>
+#include <wtf/EnumTraits.h>
 #include <wtf/MemoryPressureHandler.h>
 #include <wtf/NeverDestroyed.h>
 #include <wtf/text/WTFString.h>
@@ -1390,7 +1389,7 @@ void SWServer::addContextConnection(SWServerToContextConnection& connection)
 
     ASSERT(!m_contextConnections.contains(connection.registrableDomain()));
 
-    m_contextConnections.add(connection.registrableDomain(), &connection);
+    m_contextConnections.add(connection.registrableDomain(), connection);
 
     contextConnectionCreated(connection);
 }
@@ -1408,6 +1407,11 @@ void SWServer::removeContextConnection(SWServerToContextConnection& connection)
     markAllWorkersForRegistrableDomainAsTerminated(registrableDomain);
     if (needsContextConnectionForRegistrableDomain(registrableDomain))
         createContextConnection(registrableDomain, serviceWorkerPageIdentifier);
+}
+
+SWServerToContextConnection* SWServer::contextConnectionForRegistrableDomain(const RegistrableDomain& domain)
+{
+    return m_contextConnections.get(domain);
 }
 
 void SWServer::createContextConnection(const RegistrableDomain& registrableDomain, std::optional<ScriptExecutionContextIdentifier> serviceWorkerPageIdentifier)
@@ -1653,7 +1657,7 @@ void SWServer::fireFunctionalEvent(SWServerRegistration& registration, Completio
 
     // FIXME: we should check whether we can skip the event and if skipping do a soft-update.
 
-    RELEASE_LOG(ServiceWorker, "SWServer::fireFunctionalEvent serviceWorkerID=%llu, state=%hhu", worker->identifier().toUInt64(), worker->state());
+    RELEASE_LOG(ServiceWorker, "SWServer::fireFunctionalEvent serviceWorkerID=%llu, state=%hhu", worker->identifier().toUInt64(), enumToUnderlyingType(worker->state()));
 
     worker->whenActivated([this, weakThis = WeakPtr { *this }, callback = WTFMove(callback), registrationIdentifier = registration.identifier(), serviceWorkerIdentifier = worker->identifier()](bool success) mutable {
         if (!weakThis) {
@@ -1713,7 +1717,7 @@ void SWServer::setInspectable(ServiceWorkerIsInspectable inspectable)
 
     m_isInspectable = inspectable;
 
-    for (auto* connection : m_contextConnections.values())
+    for (auto& connection : m_contextConnections.values())
         connection->setInspectable(inspectable);
 }
 
@@ -1807,5 +1811,3 @@ void SWServer::Connection::retrieveRecordResponseBody(BackgroundFetchRecordIdent
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

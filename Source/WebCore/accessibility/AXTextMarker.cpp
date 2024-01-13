@@ -194,6 +194,13 @@ std::optional<BoundaryPoint> AXTextMarker::boundaryPoint() const
     return { { *node, static_cast<unsigned>(offset) } };
 }
 
+#if ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+RefPtr<AXIsolatedObject> AXTextMarker::isolatedObject() const
+{
+    return dynamicDowncast<AXIsolatedObject>(object());
+}
+#endif // ENABLE(ACCESSIBILITY_ISOLATED_TREE)
+
 RefPtr<AXCoreObject> AXTextMarker::object() const
 {
     if (isNull())
@@ -209,7 +216,6 @@ RefPtr<AXCoreObject> AXTextMarker::object() const
     return tree ? tree->objectForID(objectID()) : nullptr;
 }
 
-#if ENABLE(TREE_DEBUGGING)
 String AXTextMarker::debugDescription() const
 {
     auto separator = ", ";
@@ -218,17 +224,16 @@ String AXTextMarker::debugDescription() const
         "treeID ", treeID().loggingString()
         , separator, "objectID ", objectID().loggingString()
         , separator, "role ", object ? accessibilityRoleToString(object->roleValue()) : String("no object"_s)
-        , separator, isMainThread() ? node()->debugDescription()
+        , isIgnored() ? makeString(separator, "ignored") : ""_s
+        , separator, isMainThread() && node() ? node()->debugDescription()
             : makeString("node 0x", hex(reinterpret_cast<uintptr_t>(m_data.node)))
+        , separator, "anchor ", m_data.anchorType
+        , separator, "affinity ", m_data.affinity
         , separator, "offset ", m_data.offset
-        , separator, "AnchorType ", m_data.anchorType
-        , separator, "Affinity ", m_data.affinity
         , separator, "characterStart ", m_data.characterStart
         , separator, "characterOffset ", m_data.characterOffset
-        , separator, "isIgnored ", isIgnored()
     );
 }
-#endif
 
 AXTextMarkerRange::AXTextMarkerRange(const VisiblePositionRange& range)
     : m_start(range.start)
@@ -301,6 +306,45 @@ std::optional<CharacterRange> AXTextMarkerRange::characterRange() const
     return { { m_start.m_data.characterOffset, m_end.m_data.characterOffset - m_start.m_data.characterOffset } };
 }
 
+std::optional<AXTextMarkerRange> AXTextMarkerRange::intersectionWith(const AXTextMarkerRange& other) const
+{
+    if (UNLIKELY(m_start.m_data.treeID != m_end.m_data.treeID
+        || other.m_start.m_data.treeID != other.m_end.m_data.treeID
+        || m_start.m_data.treeID != other.m_start.m_data.treeID)) {
+        return std::nullopt;
+    }
+
+    // Fast path: both ranges span one object
+    if (m_start.m_data.objectID == m_end.m_data.objectID
+        && other.m_start.m_data.objectID == other.m_end.m_data.objectID) {
+        if (m_start.m_data.objectID != other.m_start.m_data.objectID)
+            return std::nullopt;
+
+        unsigned startOffset = std::max(m_start.m_data.characterOffset, other.m_start.m_data.characterOffset);
+        unsigned endOffset = std::min(m_end.m_data.characterOffset, other.m_end.m_data.characterOffset);
+
+        if (startOffset > endOffset)
+            return std::nullopt;
+
+        auto startMarker = AXTextMarker({ m_start.treeID(), m_start.objectID(), nullptr, startOffset, Position::PositionIsOffsetInAnchor, Affinity::Downstream, 0, startOffset });
+        auto endMarker = AXTextMarker({ m_start.treeID(), m_start.objectID(), nullptr, endOffset, Position::PositionIsOffsetInAnchor, Affinity::Downstream, 0, endOffset });
+        return { { startMarker, endMarker } };
+    }
+
+    return Accessibility::retrieveValueFromMainThread<std::optional<AXTextMarkerRange>>([this, &other] () -> std::optional<AXTextMarkerRange> {
+        auto intersection = WebCore::intersection(*this, other);
+        if (intersection.isNull())
+            return std::nullopt;
+
+        return { AXTextMarkerRange(intersection) };
+    });
+}
+
+String AXTextMarkerRange::debugDescription() const
+{
+    return makeString("start: {", m_start.debugDescription(), "}\nend:   {", m_end.debugDescription(), "}");
+}
+
 std::partial_ordering partialOrder(const AXTextMarker& marker1, const AXTextMarker& marker2)
 {
     if (marker1.objectID() == marker2.objectID() && LIKELY(marker1.treeID() == marker2.treeID())) {
@@ -330,5 +374,217 @@ bool AXTextMarkerRange::isConfinedTo(AXID objectID) const
         && m_end.objectID() == objectID
         && LIKELY(m_start.treeID() == m_end.treeID());
 }
+
+#if ENABLE(AX_THREAD_TEXT_APIS)
+enum class CheckStart : bool { No, Yes };
+// Finds the next object with text runs in the given direction.
+static RefPtr<AXIsolatedObject> findObjectWithRuns(AXIsolatedObject& start, AXDirection direction, CheckStart checkStart = CheckStart::No)
+{
+    if (checkStart == CheckStart::Yes) {
+        if (auto* runs = start.textRuns(); runs && runs->size())
+            return &start;
+    }
+
+    RefPtr current = &start;
+    while (current) {
+        if (current != &start) {
+            auto* runs = current->textRuns();
+            if (runs && runs->size())
+                return current;
+        }
+
+        // FIXME: aria-owns breaks this traversal, as aria-owns causes the AX tree to be changed, affecting
+        // our iteration below, but it doesn't actually change text position on the page. So we need to ignore aria-owns
+        // tree changes here in order to behave correctly.
+        // We also probably need to do something about text within aria-hidden containers, which affects the AX tree.
+
+        const auto& children = current->children();
+        if (children.size()) {
+            size_t childIndex = direction == AXDirection::Next ? 0 : children.size() - 1;
+            RELEASE_ASSERT(children[childIndex]);
+            current = dynamicDowncast<AXIsolatedObject>(children[childIndex].get());
+            continue;
+        }
+
+        // `current` has no children, meaning it's a leaf node (e.g. it's text, which cannot have children).
+        // Check `current`s siblings.
+        if (auto* sibling = current->sibling(direction)) {
+            current = dynamicDowncast<AXIsolatedObject>(sibling);
+            continue;
+        }
+
+        // We have no children, and no next/previous sibling. Try our parent's sibling.
+        if (auto* parent = current->parentObjectUnignored()) {
+            current = dynamicDowncast<AXIsolatedObject>(parent->sibling(direction));
+            continue;
+        }
+
+        break;
+    }
+    return nullptr;
+}
+
+String AXTextMarkerRange::toString() const
+{
+    RELEASE_ASSERT(!isMainThread());
+
+    auto start = m_start.toTextLeafMarker();
+    if (!start.isValid())
+        return emptyString();
+    auto end = m_end.toTextLeafMarker();
+    if (!end.isValid())
+        return emptyString();
+
+    if (start.isolatedObject() == end.isolatedObject()) {
+        size_t minOffset = std::min(start.offset(), end.offset());
+        size_t maxOffset = std::max(start.offset(), end.offset());
+        return start.runs()->substring(minOffset, maxOffset - minOffset);
+    }
+
+    StringBuilder result;
+    result.append(start.runs()->substring(start.offset()));
+
+    // FIXME: If we've been given reversed markers, i.e. the end marker actually comes before the start marker,
+    // we may want to detect this and try searching AXDirection::Previous?
+    RefPtr current = findObjectWithRuns(*start.isolatedObject(), AXDirection::Next);
+    while (current && current->objectID() != end.objectID()) {
+        const auto* runs = current->textRuns();
+        for (unsigned i = 0; i < runs->size(); i++)
+            result.append(runs->at(i).text);
+        current = findObjectWithRuns(*current, AXDirection::Next);
+    }
+    result.append(end.runs()->substring(0, end.offset()));
+    return result.toString();
+}
+
+const AXTextRuns* AXTextMarker::runs() const
+{
+    RefPtr object = isolatedObject();
+    return object ? object->textRuns() : nullptr;
+}
+
+AXTextMarker AXTextMarker::findMarker(AXDirection direction) const
+{
+    if (!isValid())
+        return { };
+    if (!isInTextLeaf())
+        return toTextLeafMarker().findMarker(direction);
+    RELEASE_ASSERT(isInTextLeaf());
+
+    size_t runIndex = runs()->indexForOffset(offset());
+    RELEASE_ASSERT(runIndex != notFound);
+    auto hasMoreTextInCurrentRun = [&] {
+        if (direction == AXDirection::Next)
+            return offset() < runs()->at(runIndex).text.length();
+        return offset() > 0;
+    };
+    bool hasAnotherRun = runIndex + 1 < runs()->size();
+    // The next run should not have empty text, because we're going to return a position containing offset() + 1, which would be wrong.
+    RELEASE_ASSERT(direction == AXDirection::Previous || !hasAnotherRun || runs()->runLength(runIndex + 1) > 0);
+    // Checking for the presence of another run is only relevant for moving AXDirection::Next, as just checking that offset() > 0 is sufficient for AXDirection::Previous.
+    if (hasMoreTextInCurrentRun() || (direction == AXDirection::Next && hasAnotherRun)) {
+        // Return an offset to the next character in the current run.
+        return { treeID(), objectID(), direction == AXDirection::Next ? offset() + 1 : offset() - 1 };
+    }
+    // offset() pointed to the last character in the given object's runs, so let's traverse to find the next object with runs.
+    if (RefPtr object = findObjectWithRuns(*this->isolatedObject(), direction))
+        return { object->treeID(), object->objectID(), direction == AXDirection::Next ? 0 : object->textRuns()->lastRunLength() };
+
+    return { };
+}
+
+AXTextMarker AXTextMarker::findMarker(AXDirection direction, AXTextUnit textUnit, AXTextUnitBoundary boundary) const
+{
+    if (!isValid())
+        return { };
+    if (!isInTextLeaf())
+        return toTextLeafMarker().findMarker(direction, textUnit, boundary);
+    RELEASE_ASSERT(isInTextLeaf());
+
+    if (textUnit == AXTextUnit::Line) {
+        size_t runIndex = runs()->indexForOffset(offset());
+        RELEASE_ASSERT(runIndex != notFound);
+        RefPtr currentObject = isolatedObject();
+        const auto* currentRuns = currentObject->textRuns();
+
+        auto computeOffset = [&] (size_t runEndOffset, size_t runLength) {
+            // This works because `runEndOffset` is the offset pointing to the end of the given run, which includes the length of all runs preceding it. So subtracting that from the length of the current run gives us an offset to the start of the current run.
+            return boundary == AXTextUnitBoundary::End ? runEndOffset : runEndOffset - runLength;
+        };
+        auto linePosition = AXTextMarker(treeID(), objectID(), computeOffset(currentRuns->runLengthSumTo(runIndex), currentRuns->runLength(runIndex)));
+        auto startLineID = currentRuns->lineID(runIndex);
+        // We found the start run and associated line, now iterate until we find a line boundary.
+        while (currentObject) {
+            RELEASE_ASSERT(currentRuns->size());
+            unsigned cumulativeOffset = 0;
+            for (size_t i = 0; i < currentRuns->size(); i++) {
+                cumulativeOffset += currentRuns->runLength(i);
+                if (currentRuns->lineID(i) != startLineID)
+                    return linePosition;
+                linePosition = AXTextMarker(currentObject->treeID(), currentObject->objectID(), computeOffset(cumulativeOffset, currentRuns->runLength(i)));
+            }
+            currentObject = findObjectWithRuns(*currentObject, direction);
+            if (currentObject)
+                currentRuns = currentObject->textRuns();
+        }
+        return linePosition;
+    }
+    // FIXME: Implement the other AXTextUnits.
+
+    return { };
+}
+
+AXTextMarker AXTextMarker::toTextLeafMarker() const
+{
+    if (!isValid() || isInTextLeaf()) {
+        // If something has constructed a leaf marker, it should've done so with an in-bounds offset.
+        RELEASE_ASSERT(!isValid() || isolatedObject()->textRuns()->totalLength() >= offset());
+        return *this;
+    }
+
+    // Find the leaf node our offset points to. For example:
+    // AXTextMarker { ID 1: Group, Offset 6 }
+    // ID 1: Group
+    //  - ID 2: Foo
+    //  - ID 3: Line1
+    //          Line2
+    // Calling toTextLeafMarker() on the original marker should yield new marker:
+    // AXTextMarker { ID 3: StaticText, Offset 3 }
+    // Because we had to walk over ID 2 which had length 3 text.
+    size_t precedingOffset = 0;
+    RefPtr current = findObjectWithRuns(*isolatedObject(), AXDirection::Next, CheckStart::Yes);
+    while (current) {
+        unsigned totalLength = current->textRuns()->totalLength();
+        if (precedingOffset + totalLength >= offset())
+            break;
+        precedingOffset += totalLength;
+        current = findObjectWithRuns(*current, AXDirection::Next);
+    }
+
+    if (!current)
+        return { };
+
+    RELEASE_ASSERT(offset() >= precedingOffset);
+    return { current->treeID(), current->objectID(), static_cast<unsigned>(offset() - precedingOffset) };
+}
+
+bool AXTextMarker::isInTextLeaf() const
+{
+    RefPtr object = this->isolatedObject();
+    // FIXME: Is it possible for non-leaf nodes to have text runs? If so, we don't handle them correctly.
+    return !object || (!object->children().size() && object->textRuns());
+}
+
+AXTextMarkerRange AXTextMarker::lineRange(LineRangeType type) const
+{
+    if (!isValid())
+        return { { }, { } };
+
+    if (type == LineRangeType::Current)
+        return { findMarker(AXDirection::Previous, AXTextUnit::Line, AXTextUnitBoundary::Start), findMarker(AXDirection::Next, AXTextUnit::Line, AXTextUnitBoundary::End) };
+    // FIXME: The other types aren't implemented yet.
+    RELEASE_ASSERT_NOT_REACHED();
+}
+#endif // ENABLE(AX_THREAD_TEXT_APIS)
 
 } // namespace WebCore

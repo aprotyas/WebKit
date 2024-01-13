@@ -26,8 +26,6 @@
 #include "config.h"
 #include "ServiceWorkerContainer.h"
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "ContentSecurityPolicy.h"
 #include "DOMPromiseProxy.h"
 #include "DedicatedWorkerGlobalScope.h"
@@ -591,7 +589,7 @@ void ServiceWorkerContainer::addRegistration(ServiceWorkerRegistration& registra
     ASSERT(m_creationThread.ptr() == &Thread::current());
 
     ensureSWClientConnection().addServiceWorkerRegistrationInServer(registration.identifier());
-    m_registrations.add(registration.identifier(), &registration);
+    m_registrations.add(registration.identifier(), registration);
 }
 
 void ServiceWorkerContainer::removeRegistration(ServiceWorkerRegistration& registration)
@@ -748,5 +746,3 @@ void ServiceWorkerContainer::getNavigationPreloadState(ServiceWorkerRegistration
 }
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

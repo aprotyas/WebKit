@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013-2021 Apple Inc. All rights reserved.
+ * Copyright (C) 2013-2023 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -111,7 +111,7 @@ JSGenericTypedArrayView<Adaptor>* JSGenericTypedArrayView<Adaptor>::create(JSGlo
 
     ASSERT(length || buffer->isResizableOrGrowableShared());
 
-    if (!ArrayBufferView::verifySubRangeLength(*buffer, byteOffset, length.value_or(0), elementSize)) {
+    if (!ArrayBufferView::verifySubRangeLength(buffer->byteLength(), byteOffset, length.value_or(0), elementSize)) {
         throwException(globalObject, scope, createRangeError(globalObject, "Length out of range of buffer"_s));
         return nullptr;
     }
@@ -856,21 +856,22 @@ template<typename Adaptor> inline auto JSGenericTypedArrayView<Adaptor>::toAdapt
     return toNativeFromValueWithoutCoercion<Adaptor>(jsValue);
 }
 
-template<typename Adaptor> inline bool JSGenericTypedArrayView<Adaptor>::sort()
+template<typename Adaptor> inline auto JSGenericTypedArrayView<Adaptor>::sort() -> SortResult
 {
     RELEASE_ASSERT(!isDetached());
     Vector<ElementType, 16> forShared;
     IdempotentArrayBufferByteLengthGetter<std::memory_order_seq_cst> getter;
     auto lengthValue = integerIndexedObjectLength(this, getter);
     if (!lengthValue)
-        return false;
+        return SortResult::Failed;
 
     size_t length = lengthValue.value();
 
     ElementType* originalArray = typedVector();
     ElementType* array = originalArray;
     if (isShared()) {
-        forShared.resize(length);
+        if (UNLIKELY(!forShared.tryGrow(length)))
+            return SortResult::OutOfMemory;
         WTF::copyElements(forShared.data(), originalArray, length);
         array = forShared.data();
     }
@@ -890,7 +891,7 @@ template<typename Adaptor> inline bool JSGenericTypedArrayView<Adaptor>::sort()
     if (isShared())
         WTF::copyElements(originalArray, forShared.data(), length);
 
-    return true;
+    return SortResult::Success;
 }
 
 template<typename Adaptor> inline bool JSGenericTypedArrayView<Adaptor>::canAccessRangeQuickly(size_t offset, size_t length)

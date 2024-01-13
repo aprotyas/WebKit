@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "MessageReceiver.h"
 #include "MessageSender.h"
 #include "ServiceWorkerDownloadTask.h"
@@ -60,6 +58,10 @@ class WebSWServerConnection;
 
 class WebSWServerToContextConnection final: public WebCore::SWServerToContextConnection, public IPC::MessageSender, public IPC::MessageReceiver {
 public:
+    using WebCore::SWServerToContextConnection::weakPtrFactory;
+    using WebCore::SWServerToContextConnection::WeakValueType;
+    using WebCore::SWServerToContextConnection::WeakPtrImplType;
+
     WebSWServerToContextConnection(NetworkConnectionToWebProcess&, WebPageProxyIdentifier, WebCore::RegistrableDomain&&, std::optional<WebCore::ScriptExecutionContextIdentifier> serviceWorkerPageIdentifier, WebCore::SWServer&);
     ~WebSWServerToContextConnection();
 
@@ -127,6 +129,3 @@ private:
 }; // class WebSWServerToContextConnection
 
 } // namespace WebKit
-
-#endif // ENABLE(SERVICE_WORKER)
-

@@ -115,7 +115,10 @@ bool ContentVisibilityDocumentState::checkRelevancyOfContentVisibilityElement(El
     };
     if (relevancyToCheck.contains(ContentRelevancy::OnScreen)) {
         auto viewportProximityIterator = m_elementViewportProximities.find(target);
-        setRelevancyValue(ContentRelevancy::OnScreen, viewportProximityIterator->value == ViewportProximity::Near);
+        auto viewportProximity = ViewportProximity::Far;
+        if (viewportProximityIterator != m_elementViewportProximities.end())
+            viewportProximity = viewportProximityIterator->value;
+        setRelevancyValue(ContentRelevancy::OnScreen, viewportProximity == ViewportProximity::Near);
     }
 
     if (relevancyToCheck.contains(ContentRelevancy::Focused))
@@ -147,11 +150,13 @@ bool ContentVisibilityDocumentState::checkRelevancyOfContentVisibilityElement(El
     auto isSkippedContent = target.isRelevantToUser() ? IsSkippedContent::No : IsSkippedContent::Yes;
     target.invalidateStyle();
     updateAnimations(target, wasSkippedContent, isSkippedContent);
-    if (target.isConnected()) {
-        ContentVisibilityAutoStateChangeEvent::Init init;
-        init.skipped = isSkippedContent == IsSkippedContent::Yes;
-        target.queueTaskToDispatchEvent(TaskSource::DOMManipulation, ContentVisibilityAutoStateChangeEvent::create(eventNames().contentvisibilityautostatechangeEvent, init));
-    }
+    target.queueTaskKeepingThisNodeAlive(TaskSource::DOMManipulation, [&, isSkippedContent] {
+        if (target.isConnected()) {
+            ContentVisibilityAutoStateChangeEvent::Init init;
+            init.skipped = isSkippedContent == IsSkippedContent::Yes;
+            target.dispatchEvent(ContentVisibilityAutoStateChangeEvent::create(eventNames().contentvisibilityautostatechangeEvent, init));
+        }
+    });
     return true;
 }
 
@@ -191,10 +196,9 @@ HadInitialVisibleContentVisibilityDetermination ContentVisibilityDocumentState::
     return hadInitialVisibleContentVisibilityDetermination;
 }
 
-// Workaround for lack of support for scroll anchoring. We make sure any content-visibility: auto elements
-// above the one to be scrolled to are already hidden, so the scroll position will not need to be adjusted
-// later.
-// FIXME: remove when scroll anchoring is implemented (https://bugs.webkit.org/show_bug.cgi?id=259269).
+// Make sure any skipped content we want to scroll to is in the viewport, so it can be actually
+// scrolled to (i.e. the skipped content early exit in LocalFrameView::scrollRectToVisible does
+// not apply anymore).
 void ContentVisibilityDocumentState::updateContentRelevancyForScrollIfNeeded(const Element& scrollAnchor)
 {
     if (!m_observer)
@@ -211,13 +215,9 @@ void ContentVisibilityDocumentState::updateContentRelevancyForScrollIfNeeded(con
     };
 
     if (RefPtr scrollAnchorRoot = findSkippedContentRoot(scrollAnchor)) {
-        for (auto& weakTarget : m_observer->observationTargets()) {
-            if (RefPtr target = weakTarget.get()) {
-                ASSERT(target->renderer() && target->renderStyle()->contentVisibility() == ContentVisibility::Auto);
-                updateViewportProximity(*target, ViewportProximity::Far);
-            }
-        }
         updateViewportProximity(*scrollAnchorRoot, ViewportProximity::Near);
+        // Since we may not have determined initial visibility yet, force scheduling the content relevancy update.
+        scrollAnchorRoot->protectedDocument()->scheduleContentRelevancyUpdate(ContentRelevancy::OnScreen);
         scrollAnchorRoot->protectedDocument()->updateRelevancyOfContentVisibilityElements();
     }
 }

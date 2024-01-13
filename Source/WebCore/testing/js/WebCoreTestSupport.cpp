@@ -28,6 +28,7 @@
 #include "WebCoreTestSupport.h"
 
 #include "DeprecatedGlobalSettings.h"
+#include "DocumentFragment.h"
 #include "FrameDestructionObserverInlines.h"
 #include "InternalSettings.h"
 #include "Internals.h"
@@ -45,6 +46,7 @@
 #include "ServiceWorkerGlobalScope.h"
 #include "SincResampler.h"
 #include "WheelEventTestMonitor.h"
+#include "XMLDocument.h"
 #include <JavaScriptCore/APICast.h>
 #include <JavaScriptCore/CallFrame.h>
 #include <JavaScriptCore/IdentifierInlines.h>
@@ -123,7 +125,7 @@ void clearWheelEventTestMonitor(WebCore::LocalFrame& frame)
     Page* page = frame.page();
     if (!page)
         return;
-    
+
     page->clearWheelEventTestMonitor();
 }
 
@@ -230,7 +232,6 @@ void setMockGamepadButtonValue(unsigned gamepadIndex, unsigned buttonIndex, doub
 
 void setupNewlyCreatedServiceWorker(uint64_t serviceWorkerIdentifier)
 {
-#if ENABLE(SERVICE_WORKER)
     auto identifier = AtomicObjectIdentifier<ServiceWorkerIdentifierType>(serviceWorkerIdentifier);
     SWContextManager::singleton().postTaskToServiceWorker(identifier, [identifier] (ServiceWorkerGlobalScope& globalScope) {
         auto* script = globalScope.script();
@@ -243,9 +244,6 @@ void setupNewlyCreatedServiceWorker(uint64_t serviceWorkerIdentifier)
         auto* contextWrapper = script->globalScopeWrapper();
         contextWrapper->putDirect(vm, Identifier::fromString(vm, Internals::internalsId), toJS(&globalObject, contextWrapper, ServiceWorkerInternals::create(globalScope, identifier)));
     });
-#else
-    UNUSED_PARAM(serviceWorkerIdentifier);
-#endif
 }
 
 #if PLATFORM(COCOA)
@@ -293,5 +291,16 @@ void testSincResamplerProcessBuffer(std::span<const float> source, std::span<flo
     SincResampler::processBuffer(source, destination, scaleFactor);
 }
 #endif // ENABLE(WEB_AUDIO)
+
+bool testDocumentFragmentParseXML(const String& chunk, OptionSet<ParserContentPolicy> parserContentPolicy)
+{
+    ProcessWarming::prewarmGlobally();
+
+    auto settings = Settings::create(nullptr);
+    auto document = WebCore::XMLDocument::createXHTML(nullptr, settings, URL());
+    auto fragment = document->createDocumentFragment();
+
+    return fragment->parseXML(chunk, nullptr, parserContentPolicy);
+}
 
 } // namespace WebCoreTestSupport

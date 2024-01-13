@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 Apple Inc. All rights reserved.
+ * Copyright (C) 2019-2024 Apple Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,8 +30,11 @@
 #include "FuzzerPredictions.h"
 #include "JSCellInlines.h"
 #include <wtf/AnsiColors.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace JSC {
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(FileBasedFuzzerAgent);
 
 FileBasedFuzzerAgent::FileBasedFuzzerAgent(VM& vm)
     : FileBasedFuzzerAgentBase(vm)
@@ -98,7 +101,7 @@ SpeculatedType FileBasedFuzzerAgent::getPredictionInternal(CodeBlock* codeBlock,
     }
     if (!generated) {
         if (Options::dumpFuzzerAgentPredictions())
-            dataLogLn(MAGENTA(BOLD(target.bytecodeIndex)), " ", BOLD(YELLOW(target.opcodeId)), " missing prediction for: ", RED(BOLD(target.lookupKey)), " ", GREEN(target.sourceFilename), ":", CYAN(target.line), ":", CYAN(target.column), " divot: ", target.divot, " -", target.startOffset, " +", target.endOffset, " name: '", YELLOW(codeBlock->inferredName()), "' source: '", BLUE(sourceUpToDivot), BLUE(BOLD(sourceAfterDivot)), "'");
+            dataLogLn(MAGENTA(BOLD(target.bytecodeIndex)), " ", BOLD(YELLOW(target.opcodeId)), " missing prediction for: ", RED(BOLD(target.lookupKey)), " ", GREEN(target.sourceFilename), ":", CYAN(target.lineColumn.line), ":", CYAN(target.lineColumn.column), " divot: ", target.divot, " -", target.startOffset, " +", target.endOffset, " name: '", YELLOW(codeBlock->inferredName()), "' source: '", BLUE(sourceUpToDivot), BLUE(BOLD(sourceAfterDivot)), "'");
 
         RELEASE_ASSERT_WITH_MESSAGE(!Options::requirePredictionForFileBasedFuzzerAgent(), "Missing expected prediction in FuzzerAgent");
         return original;

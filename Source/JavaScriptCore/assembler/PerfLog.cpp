@@ -41,6 +41,7 @@
 #include <wtf/MonotonicTime.h>
 #include <wtf/PageBlock.h>
 #include <wtf/ProcessID.h>
+#include <wtf/TZoneMallocInlines.h>
 
 namespace JSC {
 
@@ -72,12 +73,6 @@ static constexpr uint32_t elfMachine = 0x3E;
 static constexpr uint32_t elfMachine = 0xB7;
 #elif CPU(ARM)
 static constexpr uint32_t elfMachine = 0x28;
-#elif CPU(MIPS)
-#if CPU(LITTLE_ENDIAN)
-static constexpr uint32_t elfMachine = 0x0A;
-#else
-static constexpr uint32_t elfMachine = 0x08;
-#endif
 #elif CPU(RISCV64)
 static constexpr uint32_t elfMachine = 0xF3;
 #endif
@@ -124,6 +119,8 @@ struct CodeLoadRecord {
 };
 
 } // namespace JITDump
+
+WTF_MAKE_TZONE_ALLOCATED_IMPL(PerfLog);
 
 PerfLog& PerfLog::singleton()
 {

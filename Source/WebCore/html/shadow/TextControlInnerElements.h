@@ -37,8 +37,8 @@ class TextControlInnerContainer final : public HTMLDivElement {
     WTF_MAKE_ISO_ALLOCATED(TextControlInnerContainer);
 public:
     static Ref<TextControlInnerContainer> create(Document&);
+
 private:
-    static constexpr auto CreateTextControlInnerContainer = CreateHTMLDivElement | NodeFlag::HasCustomStyleResolveCallbacks;
     explicit TextControlInnerContainer(Document&);
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
     std::optional<Style::ResolvedStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle) override;
@@ -50,7 +50,6 @@ public:
     static Ref<TextControlInnerElement> create(Document&);
 
 private:
-    static constexpr auto CreateTextControlInnerElement = CreateHTMLDivElement | NodeFlag::HasCustomStyleResolveCallbacks;
     explicit TextControlInnerElement(Document&);
     std::optional<Style::ResolvedStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle) override;
 
@@ -75,7 +74,6 @@ public:
 private:
     void updateInnerTextElementEditabilityImpl(bool isEditable, bool initialization);
 
-    static constexpr auto CreateTextControlInnerTextElement = CreateHTMLDivElement | NodeFlag::HasCustomStyleResolveCallbacks;
     explicit TextControlInnerTextElement(Document&);
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) override;
     std::optional<Style::ResolvedStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle) override;
@@ -89,7 +87,6 @@ public:
     static Ref<TextControlPlaceholderElement> create(Document&);
 
 private:
-    static constexpr auto CreateTextControlPlaceholderElement = CreateHTMLDivElement | NodeFlag::HasCustomStyleResolveCallbacks;
     explicit TextControlPlaceholderElement(Document&);
     
     std::optional<Style::ResolvedStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle) override;
@@ -108,7 +105,6 @@ public:
     bool canAdjustStyleForAppearance() const { return m_canAdjustStyleForAppearance; }
 
 private:
-    static constexpr auto CreateSearchFieldResultsButtonElement = CreateHTMLDivElement | NodeFlag::HasCustomStyleResolveCallbacks;
     explicit SearchFieldResultsButtonElement(Document&);
     bool isMouseFocusable() const override { return false; }
     std::optional<Style::ResolvedStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle) override;
@@ -128,7 +124,6 @@ public:
 #endif
 
 private:
-    static constexpr auto CreateSearchFieldCancelButtonElement = CreateHTMLDivElement | NodeFlag::HasCustomStyleResolveCallbacks;
     explicit SearchFieldCancelButtonElement(Document&);
     bool isMouseFocusable() const override { return false; }
     std::optional<Style::ResolvedStyle> resolveCustomStyle(const Style::ResolutionContext&, const RenderStyle* shadowHostStyle) override;
@@ -138,10 +133,18 @@ private:
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::TextControlInnerTextElement)
     static bool isType(const WebCore::HTMLElement& element) { return element.isTextControlInnerTextElement(); }
-    static bool isType(const WebCore::Node& node) { return is<WebCore::HTMLElement>(node) && isType(downcast<WebCore::HTMLElement>(node)); }
+    static bool isType(const WebCore::Node& node)
+    {
+        auto* htmlElement = dynamicDowncast<WebCore::HTMLElement>(node);
+        return htmlElement && isType(*htmlElement);
+    }
 SPECIALIZE_TYPE_TRAITS_END()
 
 SPECIALIZE_TYPE_TRAITS_BEGIN(WebCore::SearchFieldResultsButtonElement)
     static bool isType(const WebCore::HTMLElement& element) { return element.isSearchFieldResultsButtonElement(); }
-    static bool isType(const WebCore::Node& node) { return is<WebCore::HTMLElement>(node) && isType(downcast<WebCore::HTMLElement>(node)); }
+    static bool isType(const WebCore::Node& node)
+    {
+        auto* htmlElement = dynamicDowncast<WebCore::HTMLElement>(node);
+        return htmlElement && isType(*htmlElement);
+    }
 SPECIALIZE_TYPE_TRAITS_END()

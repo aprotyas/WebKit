@@ -51,11 +51,11 @@
 #include "RenderVideo.h"
 #include "RenderView.h"
 #include "Settings.h"
-#include "ShadowPseudoIds.h"
 #include "ShadowRoot.h"
 #include "StyleProperties.h"
 #include "TextTrackCueGeneric.h"
 #include "TextTrackList.h"
+#include "UserAgentParts.h"
 #include "VTTRegionList.h"
 #include <wtf/IsoMallocInlines.h>
 #include <wtf/Language.h>
@@ -69,7 +69,7 @@ using namespace HTMLNames;
 Ref<MediaControlTextTrackContainerElement> MediaControlTextTrackContainerElement::create(Document& document, HTMLMediaElement& mediaElement)
 {
     auto element = adoptRef(*new MediaControlTextTrackContainerElement(document, mediaElement));
-    element->setPseudo(ShadowPseudoIds::webkitMediaTextTrackContainer());
+    element->setUserAgentPart(UserAgentParts::webkitMediaTextTrackContainer());
     element->hide();
     return element;
 }
@@ -98,11 +98,13 @@ void MediaControlTextTrackContainerElement::updateDisplay()
     // 1. If the media element is an audio element, or is another playback
     // mechanism with no rendering area, abort these steps. There is nothing to
     // render.
-    if (!m_mediaElement || !m_mediaElement->isVideo() || m_videoDisplaySize.size().isEmpty())
+    if (!m_mediaElement || m_videoDisplaySize.size().isEmpty())
         return;
 
     // 2. Let video be the media element or other playback mechanism.
-    HTMLVideoElement& video = downcast<HTMLVideoElement>(*m_mediaElement);
+    auto* video = dynamicDowncast<HTMLVideoElement>(*m_mediaElement);
+    if (!video)
+        return;
 
     // 3. Let output be an empty list of absolutely positioned CSS block boxes.
 
@@ -125,7 +127,7 @@ void MediaControlTextTrackContainerElement::updateDisplay()
     // 7. Let cues be an empty list of text track cues.
     // 8. For each track track in tracks, append to cues all the cues from
     // track's list of cues that have their text track cue active flag set.
-    CueList activeCues = video.currentlyActiveCues();
+    CueList activeCues = video->currentlyActiveCues();
 
     // 9. Let regions be an empty list of WebVTT regions.
 
@@ -178,8 +180,8 @@ void MediaControlTextTrackContainerElement::updateDisplay()
                 continue;
 
             cue->setFontSize(m_fontSize, m_fontSizeIsImportant);
-            if (is<VTTCue>(*cue))
-                processActiveVTTCue(downcast<VTTCue>(*cue));
+            if (RefPtr vttCue = dynamicDowncast<VTTCue>(*cue))
+                processActiveVTTCue(*vttCue);
             else {
                 auto displayBox = cue->getDisplayTree();
                 if (displayBox->hasChildNodes() && !contains(displayBox.get()))
@@ -376,9 +378,10 @@ bool MediaControlTextTrackContainerElement::updateVideoDisplaySize()
         videoBox.setWidth(videoBox.width() * deviceScaleFactor);
         videoBox.setHeight(videoBox.height() * deviceScaleFactor);
     } else {
-        if (!is<RenderVideo>(m_mediaElement->renderer()))
+        if (auto* renderVideo = dynamicDowncast<RenderVideo>(m_mediaElement->renderer()))
+            videoBox = renderVideo->videoBox();
+        else
             return false;
-        videoBox = downcast<RenderVideo>(*m_mediaElement->renderer()).videoBox();
     }
 
     if (m_videoDisplaySize == videoBox)

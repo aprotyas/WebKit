@@ -47,6 +47,27 @@ static WebHitTestResultData::ElementType elementTypeFromHitTestResult(const HitT
     return hitTestResult.mediaIsVideo() ? WebHitTestResultData::ElementType::Video : WebHitTestResultData::ElementType::Audio;
 }
 
+static RefPtr<WebFrame> webFrameFromHitTestResult(const HitTestResult& hitTestResult)
+{
+    RefPtr coreFrame = hitTestResult.frame();
+    if (!coreFrame)
+        return nullptr;
+
+    return WebFrame::fromCoreFrame(*coreFrame);
+}
+
+static String linkLocalDataMIMETypeFromHitTestResult(const HitTestResult& hitTestResult)
+{
+    if (!hitTestResult.hasLocalDataForLinkURL())
+        return nullString();
+
+    RefPtr webFrame = webFrameFromHitTestResult(hitTestResult);
+    if (!webFrame)
+        return nullString();
+
+    return webFrame->mimeTypeForResourceWithURL(hitTestResult.absoluteLinkURL());
+}
+
 WebHitTestResultData::WebHitTestResultData()
 {
 }
@@ -66,6 +87,7 @@ WebHitTestResultData::WebHitTestResultData(const HitTestResult& hitTestResult, c
     , isTextNode(hitTestResult.innerNode() && hitTestResult.innerNode()->isTextNode())
     , isOverTextInsideFormControlElement(hitTestResult.isOverTextInsideFormControlElement())
     , isDownloadableMedia(hitTestResult.isDownloadableMedia())
+    , mediaIsInFullscreen(hitTestResult.mediaIsInFullscreen())
     , elementType(ElementType::None)
     , frameInfo(frameInfoDataFromHitTestResult(hitTestResult))
     , toolTipText(toolTipText)
@@ -74,6 +96,7 @@ WebHitTestResultData::WebHitTestResultData(const HitTestResult& hitTestResult, c
         isScrollbar = scrollbar->orientation() == ScrollbarOrientation::Horizontal ? IsScrollbar::Horizontal : IsScrollbar::Vertical;
 
     elementType = elementTypeFromHitTestResult(hitTestResult);
+    linkLocalDataMIMEType = linkLocalDataMIMETypeFromHitTestResult(hitTestResult);
 }
 
 WebHitTestResultData::WebHitTestResultData(const HitTestResult& hitTestResult, bool includeImage)
@@ -91,6 +114,7 @@ WebHitTestResultData::WebHitTestResultData(const HitTestResult& hitTestResult, b
     , isTextNode(hitTestResult.innerNode() && hitTestResult.innerNode()->isTextNode())
     , isOverTextInsideFormControlElement(hitTestResult.isOverTextInsideFormControlElement())
     , isDownloadableMedia(hitTestResult.isDownloadableMedia())
+    , mediaIsInFullscreen(hitTestResult.mediaIsInFullscreen())
     , elementType(ElementType::None)
     , frameInfo(frameInfoDataFromHitTestResult(hitTestResult))
 {
@@ -98,6 +122,7 @@ WebHitTestResultData::WebHitTestResultData(const HitTestResult& hitTestResult, b
         isScrollbar = scrollbar->orientation() == ScrollbarOrientation::Horizontal ? IsScrollbar::Horizontal : IsScrollbar::Vertical;
 
     elementType = elementTypeFromHitTestResult(hitTestResult);
+    linkLocalDataMIMEType = linkLocalDataMIMETypeFromHitTestResult(hitTestResult);
 
     if (!includeImage)
         return;
@@ -129,7 +154,7 @@ WebHitTestResultData::WebHitTestResultData(const HitTestResult& hitTestResult, b
     }
 }
 
-WebHitTestResultData::WebHitTestResultData(const String& absoluteImageURL, const String& absolutePDFURL, const String& absoluteLinkURL, const String& absoluteMediaURL, const String& linkLabel, const String& linkTitle, const String& linkSuggestedFilename, bool isContentEditable, const WebCore::IntRect& elementBoundingBox, const WebKit::WebHitTestResultData::IsScrollbar& isScrollbar, bool isSelected, bool isTextNode, bool isOverTextInsideFormControlElement, bool isDownloadableMedia, const WebHitTestResultData::ElementType& elementType, std::optional<FrameInfoData>&& frameInfo, const String& lookupText, const String& toolTipText, const String& imageText, std::optional<WebKit::SharedMemory::Handle>&& imageHandle, const RefPtr<WebKit::ShareableBitmap>& imageBitmap, const String& sourceImageMIMEType,
+WebHitTestResultData::WebHitTestResultData(const String& absoluteImageURL, const String& absolutePDFURL, const String& absoluteLinkURL, const String& absoluteMediaURL, const String& linkLabel, const String& linkTitle, const String& linkSuggestedFilename, bool isContentEditable, const WebCore::IntRect& elementBoundingBox, const WebKit::WebHitTestResultData::IsScrollbar& isScrollbar, bool isSelected, bool isTextNode, bool isOverTextInsideFormControlElement, bool isDownloadableMedia, bool mediaIsInFullscreen, const WebHitTestResultData::ElementType& elementType, std::optional<FrameInfoData>&& frameInfo, const String& lookupText, const String& toolTipText, const String& imageText, std::optional<WebKit::SharedMemory::Handle>&& imageHandle, const RefPtr<WebKit::ShareableBitmap>& imageBitmap, const String& sourceImageMIMEType, const String& linkLocalDataMIMEType,
 #if PLATFORM(MAC)
     const WebHitTestResultPlatformData& platformData,
 #endif
@@ -148,6 +173,7 @@ WebHitTestResultData::WebHitTestResultData(const String& absoluteImageURL, const
         , isTextNode(isTextNode)
         , isOverTextInsideFormControlElement(isOverTextInsideFormControlElement)
         , isDownloadableMedia(isDownloadableMedia)
+        , mediaIsInFullscreen(mediaIsInFullscreen)
         , elementType(elementType)
         , frameInfo(frameInfo)
         , lookupText(lookupText)
@@ -155,6 +181,7 @@ WebHitTestResultData::WebHitTestResultData(const String& absoluteImageURL, const
         , imageText(imageText)
         , imageBitmap(imageBitmap)
         , sourceImageMIMEType(sourceImageMIMEType)
+        , linkLocalDataMIMEType(linkLocalDataMIMEType)
 #if PLATFORM(MAC)
         , platformData(platformData)
 #endif
@@ -202,11 +229,7 @@ std::optional<WebKit::SharedMemory::Handle> WebHitTestResultData::getImageShared
 
 std::optional<FrameInfoData> WebHitTestResultData::frameInfoDataFromHitTestResult(const WebCore::HitTestResult& hitTestResult)
 {
-    RefPtr coreFrame = hitTestResult.frame();
-    if (!coreFrame)
-        return std::nullopt;
-
-    RefPtr webFrame = WebFrame::fromCoreFrame(*coreFrame);
+    RefPtr webFrame = webFrameFromHitTestResult(hitTestResult);
     if (!webFrame)
         return std::nullopt;
 

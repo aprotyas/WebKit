@@ -50,75 +50,8 @@
 namespace WebKit {
 using namespace WebCore;
 
-
-class RemoteImageBufferProxyFlushFence : public ThreadSafeRefCounted<RemoteImageBufferProxyFlushFence> {
-    WTF_MAKE_NONCOPYABLE(RemoteImageBufferProxyFlushFence);
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    static Ref<RemoteImageBufferProxyFlushFence> create(IPC::Event event)
-    {
-        return adoptRef(*new RemoteImageBufferProxyFlushFence { WTFMove(event) });
-    }
-
-    ~RemoteImageBufferProxyFlushFence()
-    {
-        if (!m_signaled)
-            tracePoint(FlushRemoteImageBufferEnd, reinterpret_cast<uintptr_t>(this), 1u);
-    }
-
-    bool waitFor(Seconds timeout)
-    {
-        Locker locker { m_lock };
-        if (m_signaled)
-            return true;
-        m_signaled = m_event.waitFor(timeout);
-        if (m_signaled)
-            tracePoint(FlushRemoteImageBufferEnd, reinterpret_cast<uintptr_t>(this), 0u);
-        return m_signaled;
-    }
-
-    std::optional<IPC::Event> tryTakeEvent()
-    {
-        if (!m_signaled)
-            return std::nullopt;
-        Locker locker { m_lock };
-        return WTFMove(m_event);
-    }
-
-private:
-    RemoteImageBufferProxyFlushFence(IPC::Event event)
-        : m_event(WTFMove(event))
-    {
-        tracePoint(FlushRemoteImageBufferStart, reinterpret_cast<uintptr_t>(this));
-    }
-    Lock m_lock;
-    std::atomic<bool> m_signaled { false };
-    IPC::Event WTF_GUARDED_BY_LOCK(m_lock) m_event;
-};
-
-namespace {
-
-class RemoteImageBufferProxyFlusher final : public ThreadSafeImageBufferFlusher {
-    WTF_MAKE_FAST_ALLOCATED;
-public:
-    RemoteImageBufferProxyFlusher(Ref<RemoteImageBufferProxyFlushFence> flushState)
-        : m_flushState(WTFMove(flushState))
-    {
-    }
-
-    void flush() final
-    {
-        m_flushState->waitFor(RemoteRenderingBackendProxy::defaultTimeout);
-    }
-
-private:
-    Ref<RemoteImageBufferProxyFlushFence> m_flushState;
-};
-
-}
-
 RemoteImageBufferProxy::RemoteImageBufferProxy(Parameters parameters, const ImageBufferBackend::Info& info, RemoteRenderingBackendProxy& remoteRenderingBackendProxy, std::unique_ptr<ImageBufferBackend>&& backend, RenderingResourceIdentifier identifier)
-    : ImageBuffer(parameters, info, WTFMove(backend), identifier)
+    : ImageBuffer(parameters, info, { }, WTFMove(backend), identifier)
     , m_remoteRenderingBackendProxy(remoteRenderingBackendProxy)
     , m_remoteDisplayList(*this, remoteRenderingBackendProxy, { { }, ImageBuffer::logicalSize() }, ImageBuffer::baseTransform())
 {
@@ -173,7 +106,7 @@ ALWAYS_INLINE auto RemoteImageBufferProxy::sendSync(T&& message)
     if (UNLIKELY(!result.succeeded())) {
         auto& parameters = m_remoteRenderingBackendProxy->parameters();
         RELEASE_LOG(RemoteLayerBuffers, "[pageProxyID=%" PRIu64 ", webPageID=%" PRIu64 ", renderingBackend=%" PRIu64 "] RemoteDisplayListRecorderProxy::sendSync - failed, name:%" PUBLIC_LOG_STRING ", error:%" PUBLIC_LOG_STRING,
-            parameters.pageProxyID.toUInt64(), parameters.pageID.toUInt64(), parameters.identifier.toUInt64(), IPC::description(T::name()), IPC::errorAsString(result.error));
+            parameters.pageProxyID.toUInt64(), parameters.pageID.toUInt64(), parameters.identifier.toUInt64(), IPC::description(T::name()), IPC::errorAsString(result.error()));
     }
 #endif
     return result;
@@ -190,42 +123,42 @@ void RemoteImageBufferProxy::backingStoreWillChange()
 
     // If we already need a flush, this cannot be the first notification for change,
     // handled by the m_needsFlush case above.
-
-    // If we already have a pending flush, this cannot be the first notification for change.
-    if (m_pendingFlush)
-        return;
-
     prepareForBackingStoreChange();
 }
 
 void RemoteImageBufferProxy::didCreateBackend(std::optional<ImageBufferBackendHandle> handle)
 {
     ASSERT(!m_backend);
-    if (!handle) {
+    // This should match RemoteImageBufferProxy::create<>() call site and RemoteImageBuffer::create<>() call site.
+    // FIXME: this will be removed and backend be constructed in the contructor.
+    std::unique_ptr<ImageBufferBackend> backend;
+    if (handle) {
+        auto backendParameters = this->backendParameters(parameters());
+#if HAVE(IOSURFACE)
+        if (std::holds_alternative<MachSendRight>(*handle)) {
+            if (canMapBackingStore())
+                backend = ImageBufferShareableMappedIOSurfaceBackend::create(backendParameters, WTFMove(*handle));
+            else
+                backend = ImageBufferRemoteIOSurfaceBackend::create(backendParameters, WTFMove(*handle));
+        }
+#endif
+        if (std::holds_alternative<ShareableBitmap::Handle>(*handle)) {
+            m_backendInfo = ImageBuffer::populateBackendInfo<ImageBufferShareableBitmapBackend>(backendParameters);
+            backend = ImageBufferShareableBitmapBackend::create(backendParameters, WTFMove(*handle));
+        }
+    }
+    if (!backend) {
         m_remoteDisplayList.disconnect();
         m_remoteRenderingBackendProxy->remoteResourceCacheProxy().forgetImageBuffer(renderingResourceIdentifier());
         m_remoteRenderingBackendProxy->releaseImageBuffer(renderingResourceIdentifier());
         m_remoteRenderingBackendProxy = nullptr;
         return;
     }
-    // This should match RemoteImageBufferProxy::create<>() call site and RemoteImageBuffer::create<>() call site.
-    // FIXME: this will be removed and backend be constructed in the contructor.
-    std::unique_ptr<ImageBufferBackend> backend;
-    auto backendParameters = this->backendParameters(parameters());
-    if (renderingMode() == RenderingMode::Accelerated) {
-#if HAVE(IOSURFACE)
-        if (canMapBackingStore())
-            backend = ImageBufferShareableMappedIOSurfaceBackend::create(backendParameters, WTFMove(*handle));
-        else
-            backend = ImageBufferRemoteIOSurfaceBackend::create(backendParameters, WTFMove(*handle));
-#endif
-    } else
-        backend = ImageBufferShareableBitmapBackend::create(backendParameters, WTFMove(*handle));
 
     setBackend(WTFMove(backend));
 }
 
-ImageBufferBackend* RemoteImageBufferProxy::ensureBackendCreated() const
+ImageBufferBackend* RemoteImageBufferProxy::ensureBackend() const
 {
     if (!m_backend && m_remoteRenderingBackendProxy) {
         auto error = streamConnection().waitForAndDispatchImmediately<Messages::RemoteImageBufferProxy::DidCreateBackend>(m_renderingResourceIdentifier, RemoteRenderingBackendProxy::defaultTimeout);
@@ -319,7 +252,6 @@ RefPtr<PixelBuffer> RemoteImageBufferProxy::getPixelBuffer(const PixelBufferForm
 void RemoteImageBufferProxy::clearBackend()
 {
     m_needsFlush = false;
-    m_pendingFlush = nullptr;
     if (m_backend)
         prepareForBackingStoreChange();
     m_backend = nullptr;
@@ -366,14 +298,8 @@ void RemoteImageBufferProxy::flushDrawingContext()
     if (m_needsFlush) {
         TraceScope tracingScope(FlushRemoteImageBufferStart, FlushRemoteImageBufferEnd);
         sendSync(Messages::RemoteImageBuffer::FlushContextSync());
-        m_pendingFlush = nullptr;
         m_needsFlush = false;
         return;
-    }
-    if (m_pendingFlush) {
-        bool success = m_pendingFlush->waitFor(RemoteRenderingBackendProxy::defaultTimeout);
-        ASSERT_UNUSED(success, success); // Currently there is nothing to be done on a timeout.
-        m_pendingFlush = nullptr;
     }
 }
 
@@ -383,50 +309,19 @@ bool RemoteImageBufferProxy::flushDrawingContextAsync()
         return false;
 
     if (!m_needsFlush)
-        return m_pendingFlush;
-
-    LOG_WITH_STREAM(SharedDisplayLists, stream << "RemoteImageBufferProxy " << m_renderingResourceIdentifier << " flushDrawingContextAsync");
-    std::optional<IPC::Event> event;
-    // FIXME: This only recycles the event if the previous flush has been
-    // waited on successfully. It should be possible to have the same semaphore
-    // being used in multiple still-pending flushes, though if one times out,
-    // then the others will be waiting on the wrong signal.
-    if (m_pendingFlush)
-        event = m_pendingFlush->tryTakeEvent();
-    if (!event) {
-        auto pair = IPC::createEventSignalPair();
-        if (!pair) {
-            flushDrawingContext();
-            return false;
-        }
-
-        event = WTFMove(pair->event);
-        send(Messages::RemoteImageBuffer::SetFlushSignal(WTFMove(pair->signal)));
-    }
+        return false;
 
     send(Messages::RemoteImageBuffer::FlushContext());
-    m_pendingFlush = RemoteImageBufferProxyFlushFence::create(WTFMove(*event));
-    m_needsFlush = false;
     return true;
-}
-
-std::unique_ptr<ThreadSafeImageBufferFlusher> RemoteImageBufferProxy::createFlusher()
-{
-    if (UNLIKELY(!m_remoteRenderingBackendProxy))
-        return nullptr;
-    if (!flushDrawingContextAsync())
-        return nullptr;
-    return makeUnique<RemoteImageBufferProxyFlusher>(Ref<RemoteImageBufferProxyFlushFence> { *m_pendingFlush });
 }
 
 void RemoteImageBufferProxy::prepareForBackingStoreChange()
 {
-    ASSERT(!m_pendingFlush);
     // If the backing store is mapped in the process and the changes happen in the other
     // process, we need to prepare for the backing store change before we let the change happen.
     if (!canMapBackingStore())
         return;
-    if (auto* backend = ensureBackendCreated())
+    if (auto* backend = ensureBackend())
         backend->ensureNativeImagesHaveCopiedBackingStore();
 }
 
@@ -442,7 +337,7 @@ std::unique_ptr<SerializedImageBuffer> RemoteImageBufferProxy::sinkIntoSerialize
 
     prepareForBackingStoreChange();
 
-    if (!ensureBackendCreated())
+    if (!ensureBackend())
         return nullptr;
 
     m_remoteRenderingBackendProxy->remoteResourceCacheProxy().forgetImageBuffer(m_renderingResourceIdentifier);

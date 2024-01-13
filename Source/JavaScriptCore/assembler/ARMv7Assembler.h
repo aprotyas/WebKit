@@ -459,12 +459,13 @@ public:
             return *this;
         }
         intptr_t from() const { return data.realTypes.m_from; }
-        void setFrom(intptr_t from) { data.realTypes.m_from = from; }
-        intptr_t to() const { return data.realTypes.m_to; }
+        void setFrom(const ARMv7Assembler*, intptr_t from) { data.realTypes.m_from = from; }
+        intptr_t to(const ARMv7Assembler*) const { return data.realTypes.m_to; }
         JumpType type() const { return data.realTypes.m_type; }
         JumpLinkType linkType() const { return data.realTypes.m_linkType; }
         void setLinkType(JumpLinkType linkType) { ASSERT(data.realTypes.m_linkType == LinkInvalid); data.realTypes.m_linkType = linkType; }
         Condition condition() const { return data.realTypes.m_condition; }
+        bool isThunk() const { return false; }
     private:
         union {
             struct RealTypes {
@@ -2422,9 +2423,7 @@ public:
         return OP_NOP_T2a | (OP_NOP_T2b << 16);
     }
 
-    using CopyFunction = void*(&)(void*, const void*, size_t);
-
-    template <CopyFunction copy>
+    template<MachineCodeCopyMode copy>
     ALWAYS_INLINE static void fillNops(void* base, size_t size)
     {
         RELEASE_ASSERT(!(size % sizeof(int16_t)));
@@ -2433,7 +2432,7 @@ public:
         const size_t num32s = size / sizeof(int32_t);
         for (size_t i = 0; i < num32s; i++) {
             const int32_t insn = nopPseudo32();
-            copy(ptr, &insn, sizeof(int32_t));
+            machineCodeCopy<copy>(ptr, &insn, sizeof(int32_t));
             ptr += sizeof(int32_t);
         }
 
@@ -2442,8 +2441,16 @@ public:
         ASSERT(num16s * sizeof(int16_t) + num32s * sizeof(int32_t) == size);
         if (num16s) {
             const int16_t insn = nopPseudo16();
-            copy(ptr, &insn, sizeof(int16_t));
+            machineCodeCopy<copy>(ptr, &insn, sizeof(int16_t));
         }
+    }
+
+    template<MachineCodeCopyMode copy>
+    ALWAYS_INLINE static void fillNearTailCall(void* from, void* to)
+    {
+        uint16_t* ptr = reinterpret_cast<uint16_t*>(from) + 2;
+        linkJumpT4<copy>(ptr, ptr, to, BranchWithLink::No);
+        cacheFlush(from, sizeof(uint16_t) * 2);
     }
 
     void dmbSY()
@@ -2580,7 +2587,7 @@ public:
         return m_jumpsToLink;
     }
 
-    template<CopyFunction copy>
+    template<MachineCodeCopyMode copy>
     static void ALWAYS_INLINE link(LinkRecord& record, uint8_t* from, const uint8_t* fromInstruction8, uint8_t* to)
     {
         const uint16_t* fromInstruction = reinterpret_cast_ptr<const uint16_t*>(fromInstruction8);
@@ -2765,7 +2772,7 @@ public:
 
     static void replaceWithNops(void* instructionStart, size_t memoryToFillWithNopsInBytes)
     {
-        fillNops<performJITMemcpy>(instructionStart, memoryToFillWithNopsInBytes);
+        fillNops<MachineCodeCopyMode::JITMemcpy>(instructionStart, memoryToFillWithNopsInBytes);
         cacheFlush(instructionStart, memoryToFillWithNopsInBytes);
     }
 
@@ -3043,7 +3050,7 @@ private:
         return ((relative << 7) >> 7) == relative;
     }
 
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkJumpT1(Condition cond, uint16_t* writeTarget, const uint16_t* instruction, void* target)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(        
@@ -3060,10 +3067,10 @@ private:
         // All branch offsets should be an even distance.
         ASSERT(!(relative & 1));
         uint16_t newInstruction = OP_B_T1 | ((cond & 0xf) << 8) | ((relative & 0x1fe) >> 1);
-        copy(writeTarget - 1, &newInstruction, sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 1, &newInstruction, sizeof(uint16_t));
     }
 
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkJumpT2(uint16_t* writeTarget, const uint16_t* instruction, void* target)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(        
@@ -3080,10 +3087,10 @@ private:
         // All branch offsets should be an even distance.
         ASSERT(!(relative & 1));
         uint16_t newInstruction = OP_B_T2 | ((relative & 0xffe) >> 1);
-        copy(writeTarget - 1, &newInstruction, sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 1, &newInstruction, sizeof(uint16_t));
     }
     
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkJumpT3(Condition cond, uint16_t* writeTarget, const uint16_t* instruction, void* target)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(
@@ -3098,10 +3105,10 @@ private:
         uint16_t instructions[2];
         instructions[0] = OP_B_T3a | ((relative & 0x100000) >> 10) | ((cond & 0xf) << 6) | ((relative & 0x3f000) >> 12);
         instructions[1] = OP_B_T3b | ((relative & 0x80000) >> 8) | ((relative & 0x40000) >> 5) | ((relative & 0xffe) >> 1);
-        copy(writeTarget - 2, instructions, 2 * sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 2, instructions, 2 * sizeof(uint16_t));
     }
     
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkJumpT4(uint16_t* writeTarget, const uint16_t* instruction, void* target, BranchWithLink link)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(        
@@ -3119,10 +3126,10 @@ private:
         uint16_t instructions[2];
         instructions[0] = OP_B_T4a | ((relative & 0x1000000) >> 14) | ((relative & 0x3ff000) >> 12);
         instructions[1] = OP_B_T4b | (static_cast<uint16_t>(link) << 14) | ((relative & 0x800000) >> 10) | ((relative & 0x400000) >> 11) | ((relative & 0xffe) >> 1);
-        copy(writeTarget - 2, instructions, 2 * sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 2, instructions, 2 * sizeof(uint16_t));
     }
 
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkConditionalJumpT4(Condition cond, uint16_t* writeTarget, const uint16_t* instruction, void* target)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(        
@@ -3130,11 +3137,11 @@ private:
         ASSERT(!(reinterpret_cast<intptr_t>(target) & 1));
         
         uint16_t newInstruction = ifThenElse(cond) | OP_IT;
-        copy(writeTarget - 3, &newInstruction, sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 3, &newInstruction, sizeof(uint16_t));
         linkJumpT4<copy>(writeTarget, instruction, target, BranchWithLink::No);
     }
 
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkBX(uint16_t* writeTarget, const uint16_t* instruction, void* target)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(
@@ -3152,10 +3159,10 @@ private:
         instructions[3] = twoWordOp5i6Imm4Reg4EncodedImmSecond(JUMP_TEMPORARY_REGISTER, hi16);
         instructions[4] = OP_BX | (JUMP_TEMPORARY_REGISTER << 3);
 
-        copy(writeTarget - 5, instructions, 5 * sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 5, instructions, 5 * sizeof(uint16_t));
     }
 
-    template<CopyFunction copy = performJITMemcpy>
+    template<MachineCodeCopyMode copy = MachineCodeCopyMode::JITMemcpy>
     static void linkConditionalBX(Condition cond, uint16_t* writeTarget, const uint16_t* instruction, void* target)
     {
         // FIMXE: this should be up in the MacroAssembler layer. :-(        
@@ -3164,7 +3171,7 @@ private:
         
         linkBX(writeTarget, instruction, target);
         uint16_t newInstruction = ifThenElse(cond, true, true) | OP_IT;
-        copy(writeTarget - 6, &newInstruction, sizeof(uint16_t));
+        machineCodeCopy<copy>(writeTarget - 6, &newInstruction, sizeof(uint16_t));
     }
     
     static void linkJumpAbsolute(uint16_t* writeTarget, const uint16_t* instruction, void* target)
@@ -3213,7 +3220,7 @@ private:
         intptr_t offset = bitwise_cast<intptr_t>(to) - bitwise_cast<intptr_t>(fromInstruction);
 #if ENABLE(JUMP_ISLANDS)
         if (!isInt<25>(offset)) {
-            to = ExecutableAllocator::singleton().getJumpIslandTo(bitwise_cast<void*>(fromInstruction), to);
+            to = ExecutableAllocator::singleton().getJumpIslandToUsingJITMemcpy(bitwise_cast<void*>(fromInstruction), to);
             offset = bitwise_cast<intptr_t>(to) - bitwise_cast<intptr_t>(fromInstruction);
         }
 #endif

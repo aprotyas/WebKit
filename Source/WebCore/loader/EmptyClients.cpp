@@ -937,6 +937,10 @@ bool EmptyFrameLoaderClient::shouldFallBack(const ResourceError&) const
     return false;
 }
 
+void EmptyFrameLoaderClient::loadStorageAccessQuirksIfNeeded()
+{
+}
+
 bool EmptyFrameLoaderClient::canHandleRequest(const ResourceRequest&) const
 {
     return false;
@@ -1108,14 +1112,10 @@ RefPtr<LegacyPreviewLoaderClient> EmptyFrameLoaderClient::createPreviewLoaderCli
 
 #endif
 
-#if ENABLE(TRACKING_PREVENTION)
-
 bool EmptyFrameLoaderClient::hasFrameSpecificStorageAccess()
 {
     return false;
 }
-
-#endif
 
 void EmptyFrameLoaderClient::dispatchLoadEventToOwnerElementInAnotherProcess()
 {

@@ -29,6 +29,7 @@
 
 #include "ElementAncestorIteratorInlines.h"
 #include "LegacyRenderSVGResourceClipper.h"
+#include "LegacyRenderSVGResourceFilter.h"
 #include "LegacyRenderSVGResourceMarker.h"
 #include "LegacyRenderSVGResourceMasker.h"
 #include "LegacyRenderSVGRoot.h"
@@ -36,16 +37,17 @@
 #include "LegacyRenderSVGTransformableContainer.h"
 #include "LegacyRenderSVGViewportContainer.h"
 #include "NodeRenderStyle.h"
+#include "ReferencedSVGResources.h"
 #include "RenderChildIterator.h"
 #include "RenderElement.h"
 #include "RenderGeometryMap.h"
 #include "RenderIterator.h"
 #include "RenderLayer.h"
 #include "RenderSVGResourceClipper.h"
-#include "RenderSVGResourceFilter.h"
 #include "RenderSVGRoot.h"
 #include "RenderSVGShapeInlines.h"
 #include "RenderSVGText.h"
+#include "SVGClipPathElement.h"
 #include "SVGElementTypeHelpers.h"
 #include "SVGGeometryElement.h"
 #include "SVGRenderStyle.h"
@@ -59,8 +61,8 @@ namespace WebCore {
 LayoutRect SVGRenderSupport::clippedOverflowRectForRepaint(const RenderElement& renderer, const RenderLayerModelObject* repaintContainer, RenderObject::VisibleRectContext context)
 {
     // Return early for any cases where we don't actually paint
-    if (renderer.style().visibility() != Visibility::Visible && !renderer.enclosingLayer()->hasVisibleContent())
-        return LayoutRect();
+    if (renderer.isInsideEntirelyHiddenLayer())
+        return { };
 
     // Pass our local paint rect to computeFloatVisibleRectInContainer() which will
     // map to parent coords and recurse up the parent chain.
@@ -91,8 +93,8 @@ const RenderElement& SVGRenderSupport::localToParentTransform(const RenderElemen
 
     // At the SVG/HTML boundary (aka LegacyRenderSVGRoot), we apply the localToBorderBoxTransform
     // to map an element from SVG viewport coordinates to CSS box coordinates.
-    if (is<LegacyRenderSVGRoot>(parent))
-        transform = downcast<LegacyRenderSVGRoot>(parent).localToBorderBoxTransform() * renderer.localToParentTransform();
+    if (auto* svgRoot = dynamicDowncast<LegacyRenderSVGRoot>(parent))
+        transform = svgRoot->localToBorderBoxTransform() * renderer.localToParentTransform();
     else
         transform = renderer.localToParentTransform();
 
@@ -127,14 +129,15 @@ bool SVGRenderSupport::checkForSVGRepaintDuringLayout(const RenderElement& rende
         return false;
     // When a parent container is transformed in SVG, all children will be painted automatically
     // so we are able to skip redundant repaint checks.
-    auto parent = renderer.parent();
-    return !(is<LegacyRenderSVGContainer>(parent) && downcast<LegacyRenderSVGContainer>(*parent).didTransformToRootUpdate());
+    auto* parent = dynamicDowncast<LegacyRenderSVGContainer>(renderer.parent());
+    return !parent || !parent->didTransformToRootUpdate();
 }
 
 // Update a bounding box taking into account the validity of the other bounding box.
 static inline void updateObjectBoundingBox(FloatRect& objectBoundingBox, bool& objectBoundingBoxValid, const RenderObject* other, FloatRect otherBoundingBox)
 {
-    bool otherValid = is<LegacyRenderSVGContainer>(*other) ? downcast<LegacyRenderSVGContainer>(*other).isObjectBoundingBoxValid() : true;
+    auto* otherContainer = dynamicDowncast<LegacyRenderSVGContainer>(*other);
+    bool otherValid = !otherContainer || otherContainer->isObjectBoundingBoxValid();
     if (!otherValid)
         return;
 
@@ -157,7 +160,7 @@ void SVGRenderSupport::computeContainerBoundingBoxes(const RenderElement& contai
             continue;
 
         // Don't include elements in the union that do not render.
-        if (is<LegacyRenderSVGShape>(current) && downcast<LegacyRenderSVGShape>(current).isRenderingDisabled())
+        if (auto* shape = dynamicDowncast<LegacyRenderSVGShape>(current); shape && shape->isRenderingDisabled())
             continue;
 
         const AffineTransform& transform = current.localToParentTransform();
@@ -180,12 +183,12 @@ FloatRect SVGRenderSupport::computeContainerStrokeBoundingBox(const RenderElemen
             continue;
 
         // Don't include elements in the union that do not render.
-        if (is<LegacyRenderSVGShape>(current) && downcast<LegacyRenderSVGShape>(current).isRenderingDisabled())
+        if (auto* shape = dynamicDowncast<LegacyRenderSVGShape>(current); shape && shape->isRenderingDisabled())
             continue;
 
         FloatRect childStrokeBoundingBox = current.strokeBoundingBox();
-        if (is<RenderElement>(current))
-            SVGRenderSupport::intersectRepaintRectWithResources(downcast<RenderElement>(current), childStrokeBoundingBox, RepaintRectCalculation::Accurate);
+        if (auto* currentElement = dynamicDowncast<RenderElement>(current))
+            SVGRenderSupport::intersectRepaintRectWithResources(*currentElement, childStrokeBoundingBox, RepaintRectCalculation::Accurate);
         const AffineTransform& transform = current.localToParentTransform();
         if (transform.isIdentity())
             strokeBoundingBox.unite(childStrokeBoundingBox);
@@ -225,24 +228,23 @@ static inline void invalidateResourcesOfChildren(RenderElement& renderer)
 
 static inline bool layoutSizeOfNearestViewportChanged(const RenderElement& renderer)
 {
-    const RenderElement* start = &renderer;
-    while (start && !is<LegacyRenderSVGRoot>(*start) && !is<LegacyRenderSVGViewportContainer>(*start))
-        start = start->parent();
-
-    ASSERT(start);
-    if (is<LegacyRenderSVGViewportContainer>(*start))
-        return downcast<LegacyRenderSVGViewportContainer>(*start).isLayoutSizeChanged();
-
-    return downcast<LegacyRenderSVGRoot>(*start).isLayoutSizeChanged();
+    for (auto* start = &renderer; start; start = start->parent()) {
+        if (auto* svgRoot = dynamicDowncast<LegacyRenderSVGRoot>(*start))
+            return svgRoot->isLayoutSizeChanged();
+        if (auto* container = dynamicDowncast<LegacyRenderSVGViewportContainer>(*start))
+            return container->isLayoutSizeChanged();
+    }
+    ASSERT_NOT_REACHED();
+    return false;
 }
 
 bool SVGRenderSupport::transformToRootChanged(RenderElement* ancestor)
 {
     while (ancestor && !ancestor->isRenderOrLegacyRenderSVGRoot()) {
-        if (is<LegacyRenderSVGTransformableContainer>(*ancestor))
-            return downcast<LegacyRenderSVGTransformableContainer>(*ancestor).didTransformToRootUpdate();
-        if (is<LegacyRenderSVGViewportContainer>(*ancestor))
-            return downcast<LegacyRenderSVGViewportContainer>(*ancestor).didTransformToRootUpdate();
+        if (CheckedPtr container = dynamicDowncast<LegacyRenderSVGTransformableContainer>(*ancestor))
+            return container->didTransformToRootUpdate();
+        if (CheckedPtr container = dynamicDowncast<LegacyRenderSVGViewportContainer>(*ancestor))
+            return container->didTransformToRootUpdate();
         ancestor = ancestor->parent();
     }
 
@@ -251,18 +253,15 @@ bool SVGRenderSupport::transformToRootChanged(RenderElement* ancestor)
 
 void SVGRenderSupport::layoutDifferentRootIfNeeded(const RenderElement& renderer)
 {
-    if (auto* resources = SVGResourcesCache::cachedResourcesForRenderer(renderer)) {
-        auto* svgRoot = SVGRenderSupport::findTreeRootObject(renderer);
-        ASSERT(svgRoot);
-        resources->layoutDifferentRootIfNeeded(svgRoot);
-    }
+    if (auto* resources = SVGResourcesCache::cachedResourcesForRenderer(renderer))
+        resources->layoutDifferentRootIfNeeded(renderer);
 }
 
 void SVGRenderSupport::layoutChildren(RenderElement& start, bool selfNeedsLayout)
 {
     bool layoutSizeChanged = layoutSizeOfNearestViewportChanged(start);
     bool transformChanged = transformToRootChanged(&start);
-    WeakHashSet<RenderElement> elementsThatDidNotReceiveLayout;
+    SingleThreadWeakHashSet<RenderElement> elementsThatDidNotReceiveLayout;
 
     for (auto& child : childrenOfType<RenderObject>(start)) {
         bool needsLayout = selfNeedsLayout;
@@ -270,22 +269,20 @@ void SVGRenderSupport::layoutChildren(RenderElement& start, bool selfNeedsLayout
 
         if (transformChanged) {
             // If the transform changed we need to update the text metrics (note: this also happens for layoutSizeChanged=true).
-            if (is<RenderSVGText>(child))
-                downcast<RenderSVGText>(child).setNeedsTextMetricsUpdate();
+            if (CheckedPtr text = dynamicDowncast<RenderSVGText>(child))
+                text->setNeedsTextMetricsUpdate();
             needsLayout = true;
         }
 
-        if (layoutSizeChanged && is<SVGElement>(*child.node())) {
+        if (layoutSizeChanged) {
             // When selfNeedsLayout is false and the layout size changed, we have to check whether this child uses relative lengths
-            auto& element = downcast<SVGElement>(*child.node());
-            if (element.hasRelativeLengths()) {
+            if (auto* element = dynamicDowncast<SVGElement>(*child.node()); element && element->hasRelativeLengths()) {
                 // When the layout size changed and when using relative values tell the LegacyRenderSVGShape to update its shape object
-                if (is<LegacyRenderSVGShape>(child))
-                    downcast<LegacyRenderSVGShape>(child).setNeedsShapeUpdate();
-                else if (is<RenderSVGText>(child)) {
-                    auto& svgText = downcast<RenderSVGText>(child);
-                    svgText.setNeedsTextMetricsUpdate();
-                    svgText.setNeedsPositioningValuesUpdate();
+                if (CheckedPtr shape = dynamicDowncast<LegacyRenderSVGShape>(child))
+                    shape->setNeedsShapeUpdate();
+                else if (CheckedPtr svgText = dynamicDowncast<RenderSVGText>(child)) {
+                    svgText->setNeedsTextMetricsUpdate();
+                    svgText->setNeedsPositioningValuesUpdate();
                 }
                 child.setNeedsTransformUpdate();
                 needsLayout = true;
@@ -296,16 +293,19 @@ void SVGRenderSupport::layoutChildren(RenderElement& start, bool selfNeedsLayout
             child.setNeedsLayout(MarkOnlyThis);
 
         if (child.needsLayout()) {
-            layoutDifferentRootIfNeeded(downcast<RenderElement>(child));
-            downcast<RenderElement>(child).layout();
+            CheckedRef childElement = downcast<RenderElement>(child);
+            layoutDifferentRootIfNeeded(childElement);
+            childElement->layout();
             // Renderers are responsible for repainting themselves when changing, except
             // for the initial paint to avoid potential double-painting caused by non-sensical "old" bounds.
             // We could handle this in the individual objects, but for now it's easier to have
             // parent containers call repaint().  (RenderBlock::layout* has similar logic.)
             if (!childEverHadLayout)
                 child.repaint();
-        } else if (layoutSizeChanged && is<RenderElement>(child))
-            elementsThatDidNotReceiveLayout.add(downcast<RenderElement>(child));
+        } else if (layoutSizeChanged) {
+            if (auto* childElement = dynamicDowncast<RenderElement>(child))
+                elementsThatDidNotReceiveLayout.add(*childElement);
+        }
 
         ASSERT(!child.needsLayout());
     }
@@ -334,7 +334,7 @@ void SVGRenderSupport::intersectRepaintRectWithResources(const RenderElement& re
     if (!resources)
         return;
 
-    if (RenderSVGResourceFilter* filter = resources->filter())
+    if (LegacyRenderSVGResourceFilter* filter = resources->filter())
         repaintRect = filter->resourceBoundingBox(renderer, repaintRectCalculation);
 
     if (LegacyRenderSVGResourceClipper* clipper = resources->clipper())
@@ -389,19 +389,17 @@ inline FloatRect clipPathReferenceBox(const RenderElement& renderer, CSSBoxType 
 inline bool isPointInCSSClippingArea(const RenderElement& renderer, const FloatPoint& point)
 {
     PathOperation* clipPathOperation = renderer.style().clipPath();
-    if (is<ShapePathOperation>(clipPathOperation)) {
-        auto& clipPath = downcast<ShapePathOperation>(*clipPathOperation);
-        FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath.referenceBox());
+    if (auto* clipPath = dynamicDowncast<ShapePathOperation>(clipPathOperation)) {
+        FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
         if (!referenceBox.contains(point))
             return false;
-        return clipPath.pathForReferenceRect(referenceBox).contains(point, clipPath.windRule());
+        return clipPath->pathForReferenceRect(referenceBox).contains(point, clipPath->windRule());
     }
-    if (is<BoxPathOperation>(clipPathOperation)) {
-        auto& clipPath = downcast<BoxPathOperation>(*clipPathOperation);
-        FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath.referenceBox());
+    if (auto* clipPath = dynamicDowncast<BoxPathOperation>(clipPathOperation)) {
+        FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
         if (!referenceBox.contains(point))
             return false;
-        return clipPath.pathForReferenceRect(FloatRoundedRect {referenceBox}).contains(point);
+        return clipPath->pathForReferenceRect(FloatRoundedRect { referenceBox }).contains(point);
     }
 
     return true;
@@ -410,22 +408,20 @@ inline bool isPointInCSSClippingArea(const RenderElement& renderer, const FloatP
 void SVGRenderSupport::clipContextToCSSClippingArea(GraphicsContext& context, const RenderElement& renderer)
 {
     PathOperation* clipPathOperation = renderer.style().clipPath();
-    if (is<ShapePathOperation>(clipPathOperation)) {
-        auto& clipPath = downcast<ShapePathOperation>(*clipPathOperation);
+    if (auto* clipPath = dynamicDowncast<ShapePathOperation>(clipPathOperation)) {
         auto localToParentTransform = renderer.localToParentTransform();
 
-        auto referenceBox = clipPathReferenceBox(renderer, clipPath.referenceBox());
+        auto referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
         referenceBox = localToParentTransform.mapRect(referenceBox);
 
-        auto path = clipPath.pathForReferenceRect(referenceBox);
+        auto path = clipPath->pathForReferenceRect(referenceBox);
         path.transform(valueOrDefault(localToParentTransform.inverse()));
 
-        context.clipPath(path, clipPath.windRule());
+        context.clipPath(path, clipPath->windRule());
     }
-    if (is<BoxPathOperation>(clipPathOperation)) {
-        auto& clipPath = downcast<BoxPathOperation>(*clipPathOperation);
-        FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath.referenceBox());
-        context.clipPath(clipPath.pathForReferenceRect(FloatRoundedRect {referenceBox}));
+    if (auto* clipPath = dynamicDowncast<BoxPathOperation>(clipPathOperation)) {
+        FloatRect referenceBox = clipPathReferenceBox(renderer, clipPath->referenceBox());
+        context.clipPath(clipPath->pathForReferenceRect(FloatRoundedRect { referenceBox }));
     }
 }
 
@@ -437,6 +433,17 @@ bool SVGRenderSupport::pointInClippingArea(const RenderElement& renderer, const 
     PathOperation* clipPathOperation = renderer.style().clipPath();
     if (is<ShapePathOperation>(clipPathOperation) || is<BoxPathOperation>(clipPathOperation))
         return isPointInCSSClippingArea(renderer, point);
+
+#if ENABLE(LAYER_BASED_SVG_ENGINE)
+    if (renderer.document().settings().layerBasedSVGEngineEnabled()) {
+        if (auto* layerRenderer = dynamicDowncast<RenderLayerModelObject>(renderer)) {
+            if (auto* referencedClipperRenderer = layerRenderer->svgClipperResourceFromStyle())
+                return referencedClipperRenderer->hitTestClipContent(renderer.objectBoundingBox(), LayoutPoint(point));
+        }
+
+        return true;
+    }
+#endif
 
     // We just take clippers into account to determine if a point is on the node. The Specification may
     // change later and we also need to check maskers.
@@ -452,15 +459,15 @@ bool SVGRenderSupport::pointInClippingArea(const RenderElement& renderer, const 
 
 void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext& context, const RenderStyle& style, const RenderElement& renderer)
 {
-    Element* element = renderer.element();
-    if (!is<SVGElement>(element)) {
+    RefPtr element = dynamicDowncast<SVGElement>(renderer.element());
+    if (!element) {
         ASSERT_NOT_REACHED();
         return;
     }
 
     const SVGRenderStyle& svgStyle = style.svgStyle();
 
-    SVGLengthContext lengthContext(downcast<SVGElement>(renderer.element()));
+    SVGLengthContext lengthContext(element.get());
     context.setStrokeThickness(lengthContext.valueForLength(style.strokeWidth()));
     context.setLineCap(style.capStyle());
     context.setLineJoin(style.joinStyle());
@@ -473,15 +480,15 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext& context, const
     else {
         float scaleFactor = 1;
 
-        if (is<SVGGeometryElement>(element)) {
+        if (auto geometryElement = dynamicDowncast<SVGGeometryElement>(*element)) {
             ASSERT(renderer.isRenderOrLegacyRenderSVGShape());
             // FIXME: A value of zero is valid. Need to differentiate this case from being unspecified.
-            if (float pathLength = downcast<SVGGeometryElement>(element)->pathLength()) {
-                if (is<LegacyRenderSVGShape>(renderer))
-                    scaleFactor = downcast<LegacyRenderSVGShape>(renderer).getTotalLength() / pathLength;
+            if (float pathLength = geometryElement->pathLength()) {
+                if (auto* shape = dynamicDowncast<LegacyRenderSVGShape>(renderer))
+                    scaleFactor = shape->getTotalLength() / pathLength;
 #if ENABLE(LAYER_BASED_SVG_ENGINE)
-                else if (is<RenderSVGShape>(renderer))
-                    scaleFactor = downcast<RenderSVGShape>(renderer).getTotalLength() / pathLength;
+                else if (auto* shape = dynamicDowncast<RenderSVGShape>(renderer))
+                    scaleFactor = shape->getTotalLength() / pathLength;
 #endif
             }
         }
@@ -503,16 +510,9 @@ void SVGRenderSupport::applyStrokeStyleToContext(GraphicsContext& context, const
 
 void SVGRenderSupport::styleChanged(RenderElement& renderer, const RenderStyle* oldStyle)
 {
-#if ENABLE(CSS_COMPOSITING)
     if (renderer.element() && renderer.element()->isSVGElement() && (!oldStyle || renderer.style().hasBlendMode() != oldStyle->hasBlendMode()))
         SVGRenderSupport::updateMaskedAncestorShouldIsolateBlending(renderer);
-#else
-    UNUSED_PARAM(renderer);
-    UNUSED_PARAM(oldStyle);
-#endif
 }
-
-#if ENABLE(CSS_COMPOSITING)
 
 bool SVGRenderSupport::isolatesBlending(const RenderStyle& style)
 {
@@ -534,8 +534,6 @@ void SVGRenderSupport::updateMaskedAncestorShouldIsolateBlending(const RenderEle
     }
 }
 
-#endif
-
 SVGHitTestCycleDetectionScope::SVGHitTestCycleDetectionScope(const RenderElement& element)
 {
     m_element = element;
@@ -549,9 +547,9 @@ SVGHitTestCycleDetectionScope::~SVGHitTestCycleDetectionScope()
     ASSERT_UNUSED(result, result);
 }
 
-WeakHashSet<RenderElement>& SVGHitTestCycleDetectionScope::visitedElements()
+SingleThreadWeakHashSet<RenderElement>& SVGHitTestCycleDetectionScope::visitedElements()
 {
-    static NeverDestroyed<WeakHashSet<RenderElement>> s_visitedElements;
+    static NeverDestroyed<SingleThreadWeakHashSet<RenderElement>> s_visitedElements;
     return s_visitedElements;
 }
 
@@ -643,39 +641,15 @@ FloatRect SVGRenderSupport::calculateApproximateStrokeBoundingBox(const RenderEl
     };
 
 #if ENABLE(LAYER_BASED_SVG_ENGINE)
-    if (is<LegacyRenderSVGShape>(renderer)) {
-        const auto& shape = downcast<LegacyRenderSVGShape>(renderer);
-        return shape.adjustStrokeBoundingBoxForMarkersAndZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(shape));
-    }
+    if (auto* shape = dynamicDowncast<LegacyRenderSVGShape>(renderer))
+        return shape->adjustStrokeBoundingBoxForMarkersAndZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(*shape));
 
-    ASSERT(is<RenderSVGShape>(renderer));
     const auto& shape = downcast<RenderSVGShape>(renderer);
     return shape.adjustStrokeBoundingBoxForZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(shape));
 #else
     const auto& shape = downcast<LegacyRenderSVGShape>(renderer);
     return shape.adjustStrokeBoundingBoxForMarkersAndZeroLengthLinecaps(RepaintRectCalculation::Fast, calculate(shape));
 #endif
-}
-
-// FIXME: maybe in future RenderLayerModelObject is a better place for this.
-void SVGRenderSupport::paintSVGClippingMask(const RenderLayerModelObject& renderer, PaintInfo& paintInfo)
-{
-    ASSERT(paintInfo.phase == PaintPhase::ClippingMask);
-    auto& style = renderer.style();
-    auto& context = paintInfo.context();
-    if (!paintInfo.shouldPaintWithinRoot(renderer) || style.visibility() != Visibility::Visible || context.paintingDisabled())
-        return;
-
-    ASSERT(renderer.isSVGLayerAwareRenderer());
-#if ENABLE(LAYER_BASED_SVG_ENGINE)
-    const auto& referenceClipPathOperation = downcast<ReferencePathOperation>(*renderer.style().clipPath());
-    auto* renderResource = renderer.document().lookupSVGResourceById(referenceClipPathOperation.fragment());
-    if (!renderResource)
-        return;
-
-    if (auto clipper = dynamicDowncast<RenderSVGResourceClipper>(renderResource))
-        clipper->applyMaskClipping(paintInfo, renderer, renderer.objectBoundingBox());
-#endif // ENABLE(LAYER_BASED_SVG_ENGINE)
 }
 
 }

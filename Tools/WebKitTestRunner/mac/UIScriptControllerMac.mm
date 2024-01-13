@@ -314,6 +314,11 @@ void UIScriptControllerMac::activateAtPoint(long x, long y, JSValueRef callback)
     });
 }
 
+int64_t UIScriptControllerMac::pasteboardChangeCount() const
+{
+    return NSPasteboard.generalPasteboard.changeCount;
+}
+
 void UIScriptControllerMac::copyText(JSStringRef text)
 {
     NSPasteboard *pasteboard = NSPasteboard.generalPasteboard;
@@ -442,6 +447,11 @@ JSRetainPtr<JSStringRef> UIScriptControllerMac::scrollbarStateForScrollingNodeID
 void UIScriptControllerMac::setAppAccentColor(unsigned short red, unsigned short green, unsigned short blue)
 {
     NSApp._accentColor = [NSColor colorWithRed:red / 255. green:green / 255. blue:blue / 255. alpha:1];
+}
+
+void UIScriptControllerMac::setWebViewAllowsMagnification(bool allowsMagnification)
+{
+    webView().allowsMagnification = allowsMagnification;
 }
 
 } // namespace WTR

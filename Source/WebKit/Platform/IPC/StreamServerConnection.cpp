@@ -33,13 +33,19 @@
 
 namespace IPC {
 
-RefPtr<StreamServerConnection> StreamServerConnection::tryCreate(Handle&& handle)
+RefPtr<StreamServerConnection> StreamServerConnection::tryCreate(Handle&& handle, const StreamServerConnectionParameters& params)
 {
     auto buffer = StreamServerConnectionBuffer::map(WTFMove(handle.buffer));
     if (!buffer)
         return { };
 
     auto connection = IPC::Connection::createClientConnection(IPC::Connection::Identifier { WTFMove(handle.outOfStreamConnection) });
+
+#if ENABLE(IPC_TESTING_API)
+    if (params.ignoreInvalidMessageForTesting)
+        connection->setIgnoreInvalidMessageForTesting();
+#endif
+
     return adoptRef(*new StreamServerConnection(WTFMove(connection), WTFMove(*buffer)));
 }
 
@@ -93,7 +99,7 @@ void StreamServerConnection::stopReceivingMessages(ReceiverName receiverName, ui
     ASSERT_UNUSED(didRemove, didRemove);
 }
 
-void StreamServerConnection::enqueueMessage(Connection&, std::unique_ptr<Decoder>&& message)
+void StreamServerConnection::enqueueMessage(Connection&, UniqueRef<Decoder>&& message)
 {
     {
         Locker locker { m_outOfStreamMessagesLock };
@@ -204,6 +210,10 @@ bool StreamServerConnection::dispatchStreamMessage(Decoder&& decoder, StreamMess
     receiver.didReceiveStreamMessage(*this, decoder);
     m_isDispatchingStreamMessage = false;
     if (!decoder.isValid()) {
+#if ENABLE(IPC_TESTING_API)
+        if (m_connection->ignoreInvalidMessageForTesting())
+            return false;
+#endif // ENABLE(IPC_TESTING_API)
         m_connection->dispatchDidReceiveInvalidMessage(decoder.messageName());
         return false;
     }
@@ -224,10 +234,8 @@ bool StreamServerConnection::dispatchOutOfStreamMessage(Decoder&& decoder)
         Locker locker { m_outOfStreamMessagesLock };
         if (m_outOfStreamMessages.isEmpty())
             return false;
-        message = m_outOfStreamMessages.takeFirst();
+        message = m_outOfStreamMessages.takeFirst().moveToUniquePtr();
     }
-    if (!message)
-        return false;
 
     RefPtr<StreamMessageReceiver> receiver;
     {
@@ -238,6 +246,10 @@ bool StreamServerConnection::dispatchOutOfStreamMessage(Decoder&& decoder)
     if (receiver) {
         receiver->didReceiveStreamMessage(*this, *message);
         if (!message->isValid()) {
+#if ENABLE(IPC_TESTING_API)
+            if (m_connection->ignoreInvalidMessageForTesting())
+                return false;
+#endif // ENABLE(IPC_TESTING_API)
             m_connection->dispatchDidReceiveInvalidMessage(message->messageName());
             return false;
         }
@@ -250,5 +262,15 @@ bool StreamServerConnection::dispatchOutOfStreamMessage(Decoder&& decoder)
         m_clientWaitSemaphore.signal();
     return true;
 }
+
+#if ENABLE(IPC_TESTING_API)
+void StreamServerConnection::sendDeserializationErrorSyncReply(Connection::SyncRequestID syncRequestID)
+{
+    auto encoder = makeUniqueRef<Encoder>(MessageName::SyncMessageReply, syncRequestID.toUInt64());
+    encoder->setSyncMessageDeserializationFailure();
+    m_connection->sendSyncReply(WTFMove(encoder));
+}
+#endif
+
 
 }

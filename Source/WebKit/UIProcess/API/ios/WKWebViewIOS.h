@@ -23,6 +23,7 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#import "WKBaseScrollView.h"
 #import "WKWebViewInternal.h"
 #import "_WKTapHandlingResult.h"
 
@@ -36,7 +37,7 @@ namespace WebKit {
 enum class TapHandlingResult : uint8_t;
 }
 
-@interface WKWebView (WKViewInternalIOS)
+@interface WKWebView (WKViewInternalIOS) <WKBaseScrollViewDelegate>
 
 - (void)_setupScrollAndContentViews;
 - (void)_registerForNotifications;
@@ -159,6 +160,9 @@ enum class TapHandlingResult : uint8_t;
 - (void)_updateScrollViewInsetAdjustmentBehavior;
 - (void)_resetScrollViewInsetAdjustmentBehavior;
 
+- (void)_beginAnimatedFullScreenExit;
+- (void)_endAnimatedFullScreenExit;
+
 - (BOOL)_effectiveAppearanceIsDark;
 - (BOOL)_effectiveUserInterfaceLevelIsElevated;
 
@@ -171,10 +175,6 @@ enum class TapHandlingResult : uint8_t;
 
 #if ENABLE(LOCKDOWN_MODE_API)
 + (void)_clearLockdownModeWarningNeeded;
-#endif
-
-#if HAVE(UISCROLLVIEW_ASYNCHRONOUS_SCROLL_EVENT_HANDLING)
-- (void)_scrollView:(UIScrollView *)scrollView asynchronouslyHandleScrollEvent:(UIScrollEvent *)scrollEvent completion:(void (^)(BOOL handled))completion;
 #endif
 
 - (UIColor *)_insertionPointColor;
@@ -204,9 +204,6 @@ enum class TapHandlingResult : uint8_t;
 
 @property (nonatomic, readonly) BOOL _haveSetUnobscuredSafeAreaInsets;
 @property (nonatomic, readonly) BOOL _hasOverriddenLayoutParameters;
-@property (nonatomic, readonly) std::optional<CGSize> _viewLayoutSizeOverride;
-@property (nonatomic, readonly) std::optional<CGSize> _minimumUnobscuredSizeOverride;
-@property (nonatomic, readonly) std::optional<CGSize> _maximumUnobscuredSizeOverride;
 - (void)_resetContentOffset;
 - (void)_resetUnobscuredSafeAreaInsets;
 - (void)_resetObscuredInsets;

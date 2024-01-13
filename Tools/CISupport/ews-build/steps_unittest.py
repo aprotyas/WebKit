@@ -1244,6 +1244,23 @@ class TestCompileWebKit(BuildStepMixinAdditions, unittest.TestCase):
         self.expectOutcome(result=SUCCESS, state_string='Compiled WebKit')
         return self.runStep()
 
+    def test_success_architecture(self):
+        self.setupStep(CompileWebKit())
+        self.setProperty('platform', 'mac')
+        self.setProperty('fullPlatform', 'mac-monterey')
+        self.setProperty('configuration', 'release')
+        self.setProperty('architecture', 'x86_64 arm64')
+        self.expectRemoteCommands(
+            ExpectShell(workdir='wkdir',
+                        timeout=1200,
+                        logEnviron=False,
+                        command=['perl', 'Tools/Scripts/build-webkit', '--release', '--architecture', 'x86_64 arm64', 'WK_VALIDATE_DEPENDENCIES=YES'],
+                        )
+            + 0,
+        )
+        self.expectOutcome(result=SUCCESS, state_string='Compiled WebKit')
+        return self.runStep()
+
     def test_success_gtk(self):
         self.setupStep(CompileWebKit())
         self.setProperty('platform', 'gtk')
@@ -2031,6 +2048,25 @@ ts","version":4,"num_passes":42158,"pixel_tests_enabled":false,"date":"11:28AM o
         rc = self.runStep()
         self.assertEqual(self.getProperty(self.property_exceed_failure_limit), False)
         self.assertEqual(self.getProperty(self.property_failures), ['fast/scrolling/ios/reconcile-layer-position-recursive.html'])
+        return rc
+
+    def test_parse_results_invalid_json(self):
+        self.configureStep()
+        self.setProperty('fullPlatform', 'ios-simulator')
+        self.setProperty('configuration', 'release')
+        self.expectRemoteCommands(
+            ExpectShell(workdir='wkdir',
+                        logfiles={'json': self.jsonFileName},
+                        logEnviron=False,
+                        command=['python3', 'Tools/Scripts/run-webkit-tests', '--no-build', '--no-show-results', '--no-new-test-results', '--clobber-old-results', '--release', '--results-directory', 'layout-test-results', '--debug-rwt-logging', '--exit-after-n-failures', '60', '--skip-failing-tests'],
+                        )
+            + 2
+            + ExpectShell.log('json', stdout=self.results_json_with_newlines + " non-JSON nonsense"),
+        )
+        self.expectOutcome(result=FAILURE, state_string='layout-tests (failure)')
+        rc = self.runStep()
+        self.assertEqual(self.getProperty(self.property_exceed_failure_limit), None)
+        self.assertEqual(self.getProperty(self.property_failures), None)
         return rc
 
     def test_parse_results_json_with_missing_results(self):
@@ -4702,7 +4738,7 @@ class TestUploadFileToS3(BuildStepMixinAdditions, unittest.TestCase):
                         env=dict(UPLOAD_URL='https://test-s3-url'),
                         logEnviron=False,
                         command=['python3', 'Tools/Scripts/upload-file-to-url', '--filename', 'WebKitBuild/release.zip'],
-                        timeout=360,
+                        timeout=1800,
                         )
             + 0,
         )
@@ -4717,7 +4753,7 @@ class TestUploadFileToS3(BuildStepMixinAdditions, unittest.TestCase):
                         env=dict(UPLOAD_URL='https://test-s3-url'),
                         logEnviron=False,
                         command=['python3', 'Tools/Scripts/upload-file-to-url', '--filename', 'WebKitBuild/release.zip'],
-                        timeout=360,
+                        timeout=1800,
                         )
             + ExpectShell.log('stdio', stdout='''Uploading WebKitBuild/release.zip
 response: <Response [403]>, 403, Forbidden
@@ -5491,7 +5527,7 @@ class TestPrintConfiguration(BuildStepMixinAdditions, unittest.TestCase):
         self.expectRemoteCommands(
             ExpectShell(command=['hostname'], workdir='wkdir', timeout=60, logEnviron=False) + 0
             + ExpectShell.log('stdio', stdout='ews190'),
-            ExpectShell(command=['df', '-hl'], workdir='wkdir', timeout=60, logEnviron=False) + 0
+            ExpectShell(command=['df', '-hl', '--exclude-type=fuse.portal'], workdir='wkdir', timeout=60, logEnviron=False) + 0
             + ExpectShell.log('stdio', stdout='''Filesystem     Size   Used  Avail Capacity iused  ifree %iused  Mounted on
 /dev/disk0s3  119Gi   22Gi   97Gi    19%  337595          4294629684    0%   /'''),
             ExpectShell(command=['date'], workdir='wkdir', timeout=60, logEnviron=False) + 0
@@ -5510,7 +5546,7 @@ class TestPrintConfiguration(BuildStepMixinAdditions, unittest.TestCase):
 
         self.expectRemoteCommands(
             ExpectShell(command=['hostname'], workdir='wkdir', timeout=60, logEnviron=False) + 0,
-            ExpectShell(command=['df', '-hl'], workdir='wkdir', timeout=60, logEnviron=False) + 0,
+            ExpectShell(command=['df', '-hl', '--exclude-type=fuse.portal'], workdir='wkdir', timeout=60, logEnviron=False) + 0,
             ExpectShell(command=['date'], workdir='wkdir', timeout=60, logEnviron=False) + 0,
             ExpectShell(command=['uname', '-a'], workdir='wkdir', timeout=60, logEnviron=False) + 0,
             ExpectShell(command=['uptime'], workdir='wkdir', timeout=60, logEnviron=False) + 0,
@@ -6489,7 +6525,7 @@ class TestPushCommitToWebKitRepo(BuildStepMixinAdditions, unittest.TestCase):
                         logEnviron=False,
                         env=dict(GIT_USER='webkit-commit-queue', GIT_PASSWORD='password'),
                         command=['git', 'push', 'origin', 'HEAD:main']) +
-            ExpectShell.log('stdio', stdout=' 4c3bac1de151...b94dc426b331 ') +
+            ExpectShell.log('stdio', stdout=' 4c3bac1de151...b94dc426b331 \n') +
             0,
         )
         self.expectOutcome(result=SUCCESS, state_string='')
@@ -7030,7 +7066,7 @@ class TestShowIdentifier(BuildStepMixinAdditions, unittest.TestCase):
                         timeout=300,
                         logEnviron=False,
                         command=['python3', 'Tools/Scripts/git-webkit', 'find', '51a6aec9f664']) +
-            ExpectShell.log('stdio', stdout='Identifier: 233175@main') +
+            ExpectShell.log('stdio', stdout='Identifier: 233175@main\n') +
             0,
         )
         self.expectOutcome(result=SUCCESS, state_string='Identifier: 233175@main')
@@ -7055,7 +7091,7 @@ class TestShowIdentifier(BuildStepMixinAdditions, unittest.TestCase):
                         timeout=300,
                         logEnviron=False,
                         command=['python3', 'Tools/Scripts/git-webkit', 'find', '51a6aec9f664']) +
-            ExpectShell.log('stdio', stdout='Identifier: 233175@main') +
+            ExpectShell.log('stdio', stdout='Identifier: 233175@main\n') +
             0,
         )
         self.expectOutcome(result=SUCCESS, state_string='Identifier: 233175@main')
@@ -7076,7 +7112,7 @@ class TestShowIdentifier(BuildStepMixinAdditions, unittest.TestCase):
                         timeout=300,
                         logEnviron=False,
                         command=['python3', 'Tools/Scripts/git-webkit', 'find', '51a6aec9f664']) +
-            ExpectShell.log('stdio', stdout='Identifier: 233175@main') +
+            ExpectShell.log('stdio', stdout='Identifier: 233175@main\n') +
             0,
         )
         self.expectOutcome(result=SUCCESS, state_string='Identifier: 233175@main')

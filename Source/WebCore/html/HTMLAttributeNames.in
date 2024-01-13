@@ -163,6 +163,8 @@ inert
 inputmode
 integrity
 interactive
+invokeaction
+invoketarget
 is
 ismap
 keytype
@@ -362,7 +364,6 @@ popovertargetaction
 poster
 preload
 progress
-pseudo
 readonly
 referrerpolicy
 rel
@@ -412,6 +413,7 @@ truespeed
 type
 uiactions
 usemap
+useragentpart
 valign
 value
 valuetype

@@ -65,14 +65,14 @@ namespace WebCore {
 WTF_MAKE_ISO_ALLOCATED_IMPL(RenderInline);
 
 RenderInline::RenderInline(Type type, Element& element, RenderStyle&& style)
-    : RenderBoxModelObject(type, element, WTFMove(style), RenderInlineFlag)
+    : RenderBoxModelObject(type, element, WTFMove(style), TypeFlag::IsRenderInline, { })
 {
     setChildrenInline(true);
     ASSERT(isRenderInline());
 }
 
 RenderInline::RenderInline(Type type, Document& document, RenderStyle&& style)
-    : RenderBoxModelObject(type, document, WTFMove(style), RenderInlineFlag)
+    : RenderBoxModelObject(type, document, WTFMove(style), TypeFlag::IsRenderInline, { })
 {
     setChildrenInline(true);
     ASSERT(isRenderInline());
@@ -143,22 +143,22 @@ static void updateStyleOfAnonymousBlockContinuations(const RenderBlock& block, c
     for (RenderBox* box = block.nextSiblingBox(); box && box->isAnonymousBlock(); box = box->nextSiblingBox()) {
         if (box->style().position() == newStyle->position())
             continue;
-        
-        if (!is<RenderBlock>(*box))
+
+        CheckedPtr block = dynamicDowncast<RenderBlock>(*box);
+        if (!block)
             continue;
 
-        RenderBlock& block = downcast<RenderBlock>(*box);
-        if (!block.isContinuation())
+        if (!block->isContinuation())
             continue;
         
         // If we are no longer in-flow positioned but our descendant block(s) still have an in-flow positioned ancestor then
         // their containing anonymous block should keep its in-flow positioning. 
-        RenderInline* continuation = block.inlineContinuation();
+        RenderInline* continuation = block->inlineContinuation();
         if (oldStyle->hasInFlowPosition() && inFlowPositionedInlineAncestor(continuation))
             continue;
-        auto blockStyle = RenderStyle::createAnonymousStyleWithDisplay(block.style(), DisplayType::Block);
+        auto blockStyle = RenderStyle::createAnonymousStyleWithDisplay(block->style(), DisplayType::Block);
         blockStyle.setPosition(newStyle->position());
-        block.setStyle(WTFMove(blockStyle));
+        block->setStyle(WTFMove(blockStyle));
     }
 }
 
@@ -285,9 +285,8 @@ void RenderInline::boundingRects(Vector<LayoutRect>& rects, const LayoutPoint& a
     generateLineBoxRects(context);
 
     if (auto* continuation = this->continuation()) {
-        if (is<RenderBox>(*continuation)) {
-            auto& box = downcast<RenderBox>(*continuation);
-            continuation->boundingRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location() + box.locationOffset()));
+        if (auto* box = dynamicDowncast<RenderBox>(*continuation)) {
+            continuation->boundingRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location() + box->locationOffset()));
         } else
             continuation->boundingRects(rects, toLayoutPoint(accumulatedOffset - containingBlock()->location()));
     }
@@ -344,6 +343,102 @@ LayoutUnit RenderInline::offsetLeft() const
 LayoutUnit RenderInline::offsetTop() const
 {
     return adjustedPositionRelativeToOffsetParent(firstInlineBoxTopLeft()).y();
+}
+
+LayoutUnit RenderInline::offsetWidth() const
+{
+    auto offsetWidthForContinuation = [&]() -> std::optional<LayoutUnit> {
+        if (!continuation())
+            return { };
+        // In case of continuation we simply use the enclosing block's width for all the inline boxes participating in this continuation matching other engines.
+        CheckedPtr preBlock = this->containingBlock();
+        if (!preBlock || !preBlock->isAnonymous()) {
+            ASSERT_NOT_REACHED();
+            return { };
+        }
+        return { preBlock->offsetWidth() };
+    };
+    if (auto offsetWidth = offsetWidthForContinuation())
+        return *offsetWidth;
+    return linesBoundingBox().width();
+}
+
+static bool hasValidContinuation(const RenderInline& renderer)
+{
+    CheckedPtr preBlock = renderer.containingBlock();
+    if (!preBlock || !preBlock->isAnonymous())
+        return false;
+
+    CheckedPtr middleBlock = dynamicDowncast<RenderBlock>(preBlock->nextInFlowSibling());
+    if (!middleBlock || !middleBlock->isAnonymous() || !middleBlock->isContinuation())
+        return false;
+
+    CheckedPtr postBlock = dynamicDowncast<RenderBlock>(middleBlock->nextInFlowSibling());
+    if (!postBlock || !postBlock->isAnonymous())
+        return false;
+
+    return true;
+}
+
+static inline std::optional<LayoutUnit> offsetHeightForMiddleAndPostBlocks(const RenderBlock& middleBlock)
+{
+    // At this point we've got only middle and post blocks potentially followed by another nested continuation.
+    if (!middleBlock.isContinuation()) {
+        ASSERT_NOT_REACHED();
+        return { };
+    }
+    // post-block is supposed to include all inline content after the intrusive block.
+    // e.g. <span><span><block></block>this is after content</span>this too</span.
+    CheckedPtr postBlock = dynamicDowncast<RenderBlock>(middleBlock.nextInFlowSibling());
+    if (!postBlock || !postBlock->isAnonymous()) {
+        ASSERT_NOT_REACHED();
+        return { };
+    }
+    // With multiple intrusive blocks we end up with a chain of continuations after the post-block starting with
+    // another middle block for each nesting.
+    // e.g. <span><span><div></div><span><div>
+    CheckedPtr nestedContinuationCandidate = dynamicDowncast<RenderBlock>(postBlock->nextInFlowSibling());
+    if (!nestedContinuationCandidate || !nestedContinuationCandidate->isContinuation())
+        return { middleBlock.offsetHeight() + postBlock->offsetHeight() };
+
+    auto nestedOffsetHeight = offsetHeightForMiddleAndPostBlocks(*nestedContinuationCandidate);
+    if (!nestedOffsetHeight) {
+        ASSERT_NOT_REACHED();
+        return { };
+    }
+    return { middleBlock.offsetHeight() + postBlock->offsetHeight() + *nestedOffsetHeight };
+};
+
+static inline std::optional<LayoutUnit> offsetHeightForContinuation(const RenderInline& renderer)
+{
+    if (!renderer.continuation())
+        return { };
+
+    if (!hasValidContinuation(renderer)) {
+        ASSERT_NOT_REACHED();
+        return { };
+    }
+    // Whether this is the continuation initiating inline (<span id=initiating><div>) or just participating (<span id=participating><span id=initiating><div>)
+    // we have to find the closest anonymous block container constructed for continuation (pre-block) and
+    // use that as the anchor renderer to walk and compute the enclosing height.
+
+    // pre-block is supposed to enclose all inline content in front of the intrusive block.
+    // e.g. <span>this is pre content<span>this too<div>
+    // while middle-block is the intrusive block container.
+    CheckedPtr preBlock = renderer.containingBlock();
+    CheckedPtr middleBlock = dynamicDowncast<RenderBlock>(preBlock->nextInFlowSibling());
+    if (auto middleAndPostBlocksOffsetHeight = offsetHeightForMiddleAndPostBlocks(*middleBlock))
+        return { preBlock->offsetHeight() + *middleAndPostBlocksOffsetHeight };
+
+    ASSERT_NOT_REACHED();
+    return { };
+}
+
+LayoutUnit RenderInline::offsetHeight() const
+{
+    if (auto offsetHeight = offsetHeightForContinuation(*this))
+        return *offsetHeight;
+    return linesBoundingBox().height();
 }
 
 LayoutPoint RenderInline::firstInlineBoxTopLeft() const
@@ -647,20 +742,22 @@ LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* repai
     if (knownEmpty())
         return LayoutRect();
 
-    LayoutRect repaintRect(linesVisualOverflowBoundingBox());
+    auto repaintRect = linesVisualOverflowBoundingBox();
     bool hitRepaintContainer = false;
 
     // We need to add in the in-flow position offsets of any inlines (including us) up to our
     // containing block.
     RenderBlock* containingBlock = this->containingBlock();
-    for (const RenderElement* inlineFlow = this; is<RenderInline>(inlineFlow) && inlineFlow != containingBlock;
-         inlineFlow = inlineFlow->parent()) {
-         if (inlineFlow == repaintContainer) {
+    for (const RenderElement* inlineFlow = this; inlineFlow; inlineFlow = inlineFlow->parent()) {
+        auto* renderInline = dynamicDowncast<RenderInline>(*inlineFlow);
+        if (!renderInline || inlineFlow == containingBlock)
+            break;
+        if (inlineFlow == repaintContainer) {
             hitRepaintContainer = true;
             break;
         }
         if (inlineFlow->style().hasInFlowPosition() && inlineFlow->hasLayer())
-            repaintRect.move(downcast<RenderInline>(*inlineFlow).layer()->offsetForInFlowPosition());
+            repaintRect.move(renderInline->layer()->offsetForInFlowPosition());
     }
 
     LayoutUnit outlineSize { style().outlineSize() };
@@ -669,10 +766,13 @@ LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* repai
     if (hitRepaintContainer || !containingBlock)
         return repaintRect;
 
-    if (containingBlock->hasNonVisibleOverflow())
-        containingBlock->applyCachedClipAndScrollPosition(repaintRect, repaintContainer, context);
+    auto rects = RepaintRects { repaintRect };
 
-    repaintRect = containingBlock->computeRect(repaintRect, repaintContainer, context);
+    if (containingBlock->hasNonVisibleOverflow())
+        containingBlock->applyCachedClipAndScrollPosition(rects, repaintContainer, context);
+
+    rects = containingBlock->computeRects(rects, repaintContainer, context);
+    repaintRect = rects.clippedOverflowRect;
 
     if (outlineSize) {
         for (auto& child : childrenOfType<RenderElement>(*this))
@@ -687,6 +787,12 @@ LayoutRect RenderInline::clippedOverflowRect(const RenderLayerModelObject* repai
     return repaintRect;
 }
 
+auto RenderInline::rectsForRepaintingAfterLayout(const RenderLayerModelObject* repaintContainer, RepaintOutlineBounds) const -> RepaintRects
+{
+    // RepaintOutlineBounds is unused for inlines.
+    return { clippedOverflowRect(repaintContainer, visibleRectContextForRepaint()) };
+}
+
 LayoutRect RenderInline::rectWithOutlineForRepaint(const RenderLayerModelObject* repaintContainer, LayoutUnit outlineWidth) const
 {
     LayoutRect r(RenderBoxModelObject::rectWithOutlineForRepaint(repaintContainer, outlineWidth));
@@ -695,64 +801,61 @@ LayoutRect RenderInline::rectWithOutlineForRepaint(const RenderLayerModelObject*
     return r;
 }
 
-LayoutRect RenderInline::computeVisibleRectUsingPaintOffset(const LayoutRect& rect) const
+auto RenderInline::computeVisibleRectsUsingPaintOffset(const RepaintRects& rects) const -> RepaintRects
 {
-    LayoutRect adjustedRect = rect;
+    auto adjustedRects = rects;
     auto* layoutState = view().frameView().layoutContext().layoutState();
     if (style().hasInFlowPosition() && layer())
-        adjustedRect.move(layer()->offsetForInFlowPosition());
-    adjustedRect.move(layoutState->paintOffset());
+        adjustedRects.move(layer()->offsetForInFlowPosition());
+    adjustedRects.move(layoutState->paintOffset());
     if (layoutState->isClipped())
-        adjustedRect.intersect(layoutState->clipRect());
-    return adjustedRect;
+        adjustedRects.clippedOverflowRect.intersect(layoutState->clipRect());
+    return adjustedRects;
 }
 
-std::optional<LayoutRect> RenderInline::computeVisibleRectInContainer(const LayoutRect& rect, const RenderLayerModelObject* container, VisibleRectContext context) const
+auto RenderInline::computeVisibleRectsInContainer(const RepaintRects& rects, const RenderLayerModelObject* container, VisibleRectContext context) const -> std::optional<RepaintRects>
 {
     // Repaint offset cache is only valid for root-relative repainting
     if (view().frameView().layoutContext().isPaintOffsetCacheEnabled() && !container && !context.options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection))
-        return computeVisibleRectUsingPaintOffset(rect);
+        return computeVisibleRectsUsingPaintOffset(rects);
 
     if (container == this)
-        return rect;
+        return rects;
 
     bool containerSkipped;
     RenderElement* localContainer = this->container(container, containerSkipped);
     if (!localContainer)
-        return rect;
+        return rects;
 
-    LayoutRect adjustedRect = rect;
-    LayoutPoint topLeft = adjustedRect.location();
-
+    auto adjustedRects = rects;
     if (style().hasInFlowPosition() && layer()) {
         // Apply the in-flow position offset when invalidating a rectangle. The layer
         // is translated, but the render box isn't, so we need to do this to get the
         // right dirty rect. Since this is called from RenderObject::setStyle, the relative or sticky position
         // flag on the RenderObject has been cleared, so use the one on the style().
-        topLeft += layer()->offsetForInFlowPosition();
+        auto offsetForInFlowPosition = layer()->offsetForInFlowPosition();
+        adjustedRects.move(offsetForInFlowPosition);
     }
-    
-    // FIXME: We ignore the lightweight clipping rect that controls use, since if |o| is in mid-layout,
-    // its controlClipRect will be wrong. For overflow clip we use the values cached by the layer.
-    adjustedRect.setLocation(topLeft);
+
     if (localContainer->hasNonVisibleOverflow()) {
         // FIXME: Respect the value of context.options.
         SetForScope change(context.options, context.options | VisibleRectContextOption::ApplyCompositedContainerScrolls);
-        bool isEmpty = !downcast<RenderLayerModelObject>(*localContainer).applyCachedClipAndScrollPosition(adjustedRect, container, context);
+        bool isEmpty = !downcast<RenderLayerModelObject>(*localContainer).applyCachedClipAndScrollPosition(adjustedRects, container, context);
         if (isEmpty) {
             if (context.options.contains(VisibleRectContextOption::UseEdgeInclusiveIntersection))
                 return std::nullopt;
-            return adjustedRect;
+            return adjustedRects;
         }
     }
 
     if (containerSkipped) {
         // If the repaintContainer is below o, then we need to map the rect into repaintContainer's coordinates.
-        LayoutSize containerOffset = container->offsetFromAncestorContainer(*localContainer);
-        adjustedRect.move(-containerOffset);
-        return adjustedRect;
+        auto containerOffset = container->offsetFromAncestorContainer(*localContainer);
+        adjustedRects.move(-containerOffset);
+        return adjustedRects;
     }
-    return localContainer->computeVisibleRectInContainer(adjustedRect, container, context);
+
+    return localContainer->computeVisibleRectsInContainer(adjustedRects, container, context);
 }
 
 LayoutSize RenderInline::offsetFromContainer(RenderElement& container, const LayoutPoint&, bool* offsetDependsOnPoint) const
@@ -763,8 +866,8 @@ LayoutSize RenderInline::offsetFromContainer(RenderElement& container, const Lay
     if (isInFlowPositioned())
         offset += offsetForInFlowPosition();
 
-    if (is<RenderBox>(container))
-        offset -= toLayoutSize(downcast<RenderBox>(container).scrollPosition());
+    if (auto* box = dynamicDowncast<RenderBox>(container))
+        offset -= toLayoutSize(box->scrollPosition());
 
     if (offsetDependsOnPoint)
         *offsetDependsOnPoint = (is<RenderBox>(container) && container.style().isFlippedBlocksWritingMode()) || is<RenderFragmentedFlow>(container);
@@ -791,12 +894,14 @@ void RenderInline::mapLocalToContainer(const RenderLayerModelObject* ancestorCon
     if (!container)
         return;
 
-    if (mode.contains(ApplyContainerFlip) && is<RenderBox>(*container)) {
-        if (container->style().isFlippedBlocksWritingMode()) {
-            LayoutPoint centerPoint(transformState.mappedPoint());
-            transformState.move(downcast<RenderBox>(*container).flipForWritingMode(centerPoint) - centerPoint);
+    if (mode.contains(ApplyContainerFlip)) {
+        if (CheckedPtr box = dynamicDowncast<RenderBox>(*container)) {
+            if (container->style().isFlippedBlocksWritingMode()) {
+                LayoutPoint centerPoint(transformState.mappedPoint());
+                transformState.move(box->flipForWritingMode(centerPoint) - centerPoint);
+            }
+            mode.remove(ApplyContainerFlip);
         }
-        mode.remove(ApplyContainerFlip);
     }
 
     LayoutSize containerOffset = offsetFromContainer(*container, LayoutPoint(transformState.mappedPoint()));
@@ -959,8 +1064,8 @@ void RenderInline::addFocusRingRects(Vector<LayoutRect>& rects, const LayoutPoin
         // FIXME: This doesn't work correctly with transforms.
         if (child.hasLayer())
             pos = child.localToContainerPoint(FloatPoint(), paintContainer);
-        else if (is<RenderBox>(child))
-            pos.move(downcast<RenderBox>(child).locationOffset());
+        else if (auto* box = dynamicDowncast<RenderBox>(child))
+            pos.move(box->locationOffset());
         child.addFocusRingRects(rects, flooredIntPoint(pos), paintContainer);
     }
 
@@ -995,13 +1100,28 @@ void RenderInline::paintOutline(PaintInfo& paintInfo, const LayoutPoint& paintOf
     if (styleToUse.outlineStyleIsAuto() == OutlineIsAuto::On || !styleToUse.hasOutline())
         return;
 
+    if (!containingBlock()) {
+        ASSERT_NOT_REACHED();
+        return;
+    }
+
+    auto isHorizontalWritingMode = this->isHorizontalWritingMode();
+    auto& containingBlock = *this->containingBlock();
+    auto isFlippedBlocksWritingMode = containingBlock.style().isFlippedBlocksWritingMode();
     Vector<LayoutRect> rects;
     for (auto box = InlineIterator::firstInlineBoxFor(*this); box; box.traverseNextInlineBox()) {
         auto lineBox = box->lineBox();
-        auto top = LayoutUnit { std::max(lineBox->contentLogicalTop(), box->logicalTop()) };
-        auto bottom = LayoutUnit { std::min(lineBox->contentLogicalBottom(), box->logicalBottom()) };
-        // FIXME: This is mixing physical and logical coordinates.
-        rects.append({ LayoutUnit(box->visualRectIgnoringBlockDirection().x()), top, LayoutUnit(box->logicalWidth()), bottom - top });
+        auto logicalTop = std::max(lineBox->contentLogicalTop(), box->logicalTop());
+        auto logicalBottom = std::min(lineBox->contentLogicalBottom(), box->logicalBottom());
+        auto enclosingVisualRect = FloatRect { box->logicalLeftIgnoringInlineDirection(), logicalTop, box->logicalWidth(), logicalBottom - logicalTop };
+
+        if (!isHorizontalWritingMode)
+            enclosingVisualRect = enclosingVisualRect.transposedRect();
+
+        if (isFlippedBlocksWritingMode)
+            containingBlock.flipForWritingMode(enclosingVisualRect);
+
+        rects.append(LayoutRect { enclosingVisualRect });
     }
     BorderPainter { *this, paintInfo }.paintOutline(paintOffset, rects);
 }
@@ -1011,12 +1131,13 @@ bool isEmptyInline(const RenderInline& renderer)
     for (auto& current : childrenOfType<RenderObject>(renderer)) {
         if (current.isFloatingOrOutOfFlowPositioned())
             continue;
-        if (is<RenderText>(current)) {
-            if (!downcast<RenderText>(current).containsOnlyCollapsibleWhitespace())
+        if (auto* text = dynamicDowncast<RenderText>(current)) {
+            if (!text->containsOnlyCollapsibleWhitespace())
                 return false;
             continue;
         }
-        if (!is<RenderInline>(current) || !isEmptyInline(downcast<RenderInline>(current)))
+        auto* renderInline = dynamicDowncast<RenderInline>(current);
+        if (!renderInline || !isEmptyInline(*renderInline))
             return false;
     }
     return true;

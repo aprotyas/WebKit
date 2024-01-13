@@ -38,7 +38,7 @@ namespace WebGPU {
 ComputePassEncoder::ComputePassEncoder(id<MTLComputeCommandEncoder> computeCommandEncoder, const WGPUComputePassDescriptor& descriptor, CommandEncoder& parentEncoder, Device& device)
     : m_computeCommandEncoder(computeCommandEncoder)
     , m_device(device)
-    , m_parentEncoder(&parentEncoder)
+    , m_parentEncoder(parentEncoder)
 {
     m_parentEncoder->lock(true);
 
@@ -51,9 +51,11 @@ ComputePassEncoder::ComputePassEncoder(id<MTLComputeCommandEncoder> computeComma
     }
 }
 
-ComputePassEncoder::ComputePassEncoder(Device& device)
+ComputePassEncoder::ComputePassEncoder(CommandEncoder& parentEncoder, Device& device)
     : m_device(device)
+    , m_parentEncoder(parentEncoder)
 {
+    m_parentEncoder->lock(true);
 }
 
 ComputePassEncoder::~ComputePassEncoder()
@@ -85,21 +87,28 @@ void ComputePassEncoder::executePreDispatchCommands()
 
 void ComputePassEncoder::dispatch(uint32_t x, uint32_t y, uint32_t z)
 {
+    if (!(x * y * z))
+        return;
+
     executePreDispatchCommands();
     [m_computeCommandEncoder dispatchThreadgroups:MTLSizeMake(x, y, z) threadsPerThreadgroup:m_threadsPerThreadgroup];
 }
 
 void ComputePassEncoder::dispatchIndirect(const Buffer& indirectBuffer, uint64_t indirectOffset)
 {
-    // FIXME: ensure higher levels perform validation on indirectOffset before reaching this callsite
+    if ((indirectOffset % 4) || !(indirectBuffer.usage() & WGPUBufferUsage_Indirect) || (indirectOffset + 3 * sizeof(uint32_t) > indirectBuffer.buffer().length)) {
+        makeInvalid();
+        return;
+    }
+
     executePreDispatchCommands();
     [m_computeCommandEncoder dispatchThreadgroupsWithIndirectBuffer:indirectBuffer.buffer() indirectBufferOffset:indirectOffset threadsPerThreadgroup:m_threadsPerThreadgroup];
 }
 
 void ComputePassEncoder::endPass()
 {
-    if (!m_parentEncoder) {
-        ASSERT(!m_computeCommandEncoder);
+    if (m_debugGroupStackSize || !isValid()) {
+        m_parentEncoder->makeInvalid();
         return;
     }
 

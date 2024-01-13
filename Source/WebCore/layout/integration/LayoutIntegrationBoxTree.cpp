@@ -159,6 +159,8 @@ void BoxTree::adjustStyleIfNeeded(const RenderElement& renderer, RenderStyle& st
                 styleToAdjust.resetBorderRight();
                 styleToAdjust.setPaddingRight(RenderStyle::initialPadding());
             }
+            if ((styleToAdjust.display() == DisplayType::RubyBase || styleToAdjust.display() == DisplayType::RubyAnnotation) && renderInline.parent()->style().display() != DisplayType::Ruby)
+                styleToAdjust.setDisplay(DisplayType::Inline);
             return;
         }
         if (renderer.isRenderLineBreak()) {
@@ -192,13 +194,29 @@ UniqueRef<Layout::Box> BoxTree::createLayoutBox(RenderObject& renderer)
         auto text = style.textSecurity() == TextSecurity::None
             ? (isCombinedText ? textRenderer.originalText() : textRenderer.text())
             : RenderBlock::updateSecurityDiscCharacters(style, isCombinedText ? textRenderer.originalText() : textRenderer.text());
+
         auto canUseSimpleFontCodePath = textRenderer.canUseSimpleFontCodePath();
         auto canUseSimplifiedTextMeasuring = textRenderer.canUseSimplifiedTextMeasuring();
         if (!canUseSimplifiedTextMeasuring) {
             canUseSimplifiedTextMeasuring = canUseSimpleFontCodePath && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style, firstLineStyle.get());
             textRenderer.setCanUseSimplifiedTextMeasuring(*canUseSimplifiedTextMeasuring);
         }
-        return makeUniqueRef<Layout::InlineTextBox>(text, isCombinedText, *canUseSimplifiedTextMeasuring, canUseSimpleFontCodePath, WTFMove(style), WTFMove(firstLineStyle));
+
+        auto hasPositionDependentContentWidth = textRenderer.hasPositionDependentContentWidth();
+        if (!hasPositionDependentContentWidth) {
+            hasPositionDependentContentWidth = Layout::TextUtil::hasPositionDependentContentWidth(text);
+            textRenderer.setHasPositionDependentContentWidth(*hasPositionDependentContentWidth);
+        }
+
+        auto contentCharacteristic = OptionSet<Layout::InlineTextBox::ContentCharacteristic> { };
+        if (canUseSimpleFontCodePath)
+            contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::CanUseSimpledFontCodepath);
+        if (*canUseSimplifiedTextMeasuring)
+            contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::CanUseSimplifiedContentMeasuring);
+        if (*hasPositionDependentContentWidth)
+            contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::HasPositionDependentContentWidth);
+
+        return makeUniqueRef<Layout::InlineTextBox>(text, isCombinedText, contentCharacteristic, WTFMove(style), WTFMove(firstLineStyle));
     }
 
     auto& renderElement = downcast<RenderElement>(renderer);
@@ -213,6 +231,8 @@ UniqueRef<Layout::Box> BoxTree::createLayoutBox(RenderObject& renderer)
             listMarkerAttributes.add(Layout::ElementBox::ListMarkerAttribute::Image);
         if (!listMarkerRenderer.isInside())
             listMarkerAttributes.add(Layout::ElementBox::ListMarkerAttribute::Outside);
+        if (listMarkerRenderer.listItem() && !listMarkerRenderer.listItem()->notInList())
+            listMarkerAttributes.add(Layout::ElementBox::ListMarkerAttribute::HasListElementAncestor);
         return makeUniqueRef<Layout::ElementBox>(elementAttributes(renderElement), listMarkerAttributes, WTFMove(style), WTFMove(firstLineStyle));
     }
 
@@ -276,10 +296,15 @@ void BoxTree::updateContent(const RenderText& textRenderer)
     auto& style = inlineTextBox.style();
     auto isCombinedText = is<RenderCombineText>(textRenderer) && downcast<RenderCombineText>(textRenderer).isCombined();
     auto text = style.textSecurity() == TextSecurity::None ? (isCombinedText ? textRenderer.originalText() : textRenderer.text()) : RenderBlock::updateSecurityDiscCharacters(style, isCombinedText ? textRenderer.originalText() : textRenderer.text());
-    auto canUseSimpleFontCodePath = textRenderer.canUseSimpleFontCodePath();
-    auto canUseSimplifiedTextMeasuring = canUseSimpleFontCodePath && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style, &inlineTextBox.firstLineStyle());
+    auto contentCharacteristic = OptionSet<Layout::InlineTextBox::ContentCharacteristic> { };
+    if (textRenderer.canUseSimpleFontCodePath())
+        contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::CanUseSimpledFontCodepath);
+    if (textRenderer.canUseSimpleFontCodePath() && Layout::TextUtil::canUseSimplifiedTextMeasuring(text, style, &inlineTextBox.firstLineStyle()))
+        contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::CanUseSimplifiedContentMeasuring);
+    if (Layout::TextUtil::hasPositionDependentContentWidth(text))
+        contentCharacteristic.add(Layout::InlineTextBox::ContentCharacteristic::HasPositionDependentContentWidth);
 
-    inlineTextBox.updateContent(text, canUseSimpleFontCodePath, canUseSimplifiedTextMeasuring);
+    inlineTextBox.updateContent(text, contentCharacteristic);
 }
 
 const Layout::Box& BoxTree::insert(const RenderElement& parent, RenderObject& child, const RenderObject* beforeChild)
@@ -367,7 +392,7 @@ Layout::InitialContainingBlock& BoxTree::initialContainingBlock()
 }
 
 #if ENABLE(TREE_DEBUGGING)
-void showInlineContent(TextStream& stream, const InlineContent& inlineContent, size_t depth)
+void showInlineContent(TextStream& stream, const InlineContent& inlineContent, size_t depth, bool isDamaged)
 {
     auto& lines = inlineContent.displayContent().lines;
     auto& boxes = inlineContent.displayContent().boxes;
@@ -375,7 +400,10 @@ void showInlineContent(TextStream& stream, const InlineContent& inlineContent, s
     for (size_t lineIndex = 0, boxIndex = 0; lineIndex < lines.size() && boxIndex < boxes.size(); ++lineIndex) {
         auto addSpacing = [&](auto& streamToUse) {
             size_t printedCharacters = 0;
-            streamToUse << "---------- --";
+            if (isDamaged)
+                streamToUse << "---------- -+";
+            else
+                streamToUse << "---------- --";
             while (++printedCharacters <= depth * 2)
                 streamToUse << " ";
 
@@ -407,7 +435,11 @@ void showInlineContent(TextStream& stream, const InlineContent& inlineContent, s
                 for (auto* ancestor = &box.layoutBox(); ancestor != &rootInlineBox.layoutBox(); ancestor = &ancestor->parent())
                     inlineBoxStream << "  ";
                 auto rect = box.visualRectIgnoringBlockDirection();
-                inlineBoxStream << "Inline box at (" << rect.x() << "," << rect.y() << ") size (" << rect.width() << "x" << rect.height() << ") renderer->(" << &inlineContent.rendererForLayoutBox(box.layoutBox()) << ")";
+                inlineBoxStream << "Inline box at (" << rect.x() << "," << rect.y() << ") size (" << rect.width() << "x" << rect.height() << ")";
+                if (isDamaged)
+                    inlineBoxStream << " (renderer may be damaged)";
+                else
+                    inlineBoxStream << " renderer->(" << &inlineContent.rendererForLayoutBox(box.layoutBox()) << ")";
                 inlineBoxStream.nextLine();
             } else {
                 addSpacing(runStream);
@@ -426,7 +458,10 @@ void showInlineContent(TextStream& stream, const InlineContent& inlineContent, s
                 runStream << " at (" << box.left() << "," << box.top() << ") size " << box.width() << "x" << box.height();
                 if (box.isText())
                     runStream << " run(" << box.text().start() << ", " << box.text().end() << ")";
-                runStream << " renderer->(" << &inlineContent.rendererForLayoutBox(box.layoutBox()) << ")";
+                if (isDamaged)
+                    runStream << " (renderer may be damaged)";
+                else
+                    runStream << " renderer->(" << &inlineContent.rendererForLayoutBox(box.layoutBox()) << ")";
                 runStream.nextLine();
             }
         }

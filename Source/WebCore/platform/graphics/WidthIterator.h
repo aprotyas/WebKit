@@ -45,7 +45,7 @@ using CharactersTreatedAsSpace = Vector<OriginalAdvancesForCharacterTreatedAsSpa
 struct WidthIterator {
     WTF_MAKE_FAST_ALLOCATED;
 public:
-    WidthIterator(const FontCascade&, const TextRun&, WeakHashSet<const Font>* fallbackFonts = 0, bool accountForGlyphBounds = false, bool forTextEmphasis = false);
+    WidthIterator(const FontCascade&, const TextRun&, SingleThreadWeakHashSet<const Font>* fallbackFonts = 0, bool accountForGlyphBounds = false, bool forTextEmphasis = false);
 
     void advance(unsigned to, GlyphBuffer&);
     bool advanceOneCharacter(float& width, GlyphBuffer&);
@@ -60,10 +60,10 @@ public:
     float runWidthSoFar() const { return m_runWidthSoFar; }
     unsigned currentCharacterIndex() const { return m_currentCharacterIndex; }
 
-    static bool characterCanUseSimplifiedTextMeasuring(UChar, bool whitespaceIsCollapsed);
+    WEBCORE_EXPORT static bool characterCanUseSimplifiedTextMeasuring(char32_t, bool whitespaceIsCollapsed);
 
 private:
-    GlyphData glyphDataForCharacter(UChar32, bool mirror);
+    GlyphData glyphDataForCharacter(char32_t, bool mirror);
     template <typename TextIterator>
     inline void advanceInternal(TextIterator&, GlyphBuffer&);
 
@@ -97,7 +97,7 @@ private:
 
     CheckedRef<const FontCascade> m_font;
     CheckedRef<const TextRun> m_run;
-    WeakHashSet<const Font>* m_fallbackFonts { nullptr };
+    SingleThreadWeakHashSet<const Font>* m_fallbackFonts { nullptr };
 
     std::optional<unsigned> m_lastCharacterIndex;
     GlyphBufferAdvance m_leftoverInitialAdvance { makeGlyphBufferAdvance() };

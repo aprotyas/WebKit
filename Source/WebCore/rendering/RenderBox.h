@@ -111,6 +111,7 @@ public:
     inline LayoutSize borderBoxLogicalSize() const;
 
     WEBCORE_EXPORT RoundedRectRadii borderRadii() const;
+    RoundedRect borderRoundedRect() const;
     RoundedRect roundedBorderBoxRect() const;
 
     // The content area of the box (excludes padding - and intrinsic padding for table cells, etc... - and border).
@@ -130,7 +131,7 @@ public:
     inline LayoutRect computedCSSContentBoxRect() const;
 
     // Bounds of the outline box in absolute coords. Respects transforms
-    LayoutRect outlineBoundsForRepaint(const RenderLayerModelObject* /*repaintContainer*/, const RenderGeometryMap*) const final;
+    LayoutRect outlineBoundsForRepaint(const RenderLayerModelObject* /*repaintContainer*/, const RenderGeometryMap* = nullptr) const final;
     void addFocusRingRects(Vector<LayoutRect>&, const LayoutPoint& additionalOffset, const RenderLayerModelObject* paintContainer = nullptr) const override;
     
     FloatRect repaintRectInLocalCoordinates(RepaintRectCalculation = RepaintRectCalculation::Fast) const override { return borderBoxRect(); }
@@ -240,6 +241,9 @@ public:
         const RenderStyle* styleToUse = overrideStyle ? overrideStyle : &style();
         return m_marginBox.end(styleToUse->writingMode(), styleToUse->direction());
     }
+    LayoutUnit marginBlockStart(const WritingMode& writingMode) const { return m_marginBox.before(writingMode); }
+    LayoutUnit marginInlineStart(const WritingMode& writingMode) const { return m_marginBox.start(writingMode); }
+
     void setMarginBefore(LayoutUnit value, const RenderStyle* overrideStyle = nullptr) { m_marginBox.setBefore(value, (overrideStyle ? overrideStyle : &style())->writingMode()); }
     void setMarginAfter(LayoutUnit value, const RenderStyle* overrideStyle = nullptr) { m_marginBox.setAfter(value, (overrideStyle ? overrideStyle : &style())->writingMode()); }
     void setMarginStart(LayoutUnit value, const RenderStyle* overrideStyle = nullptr)
@@ -371,8 +375,8 @@ public:
     void setInlineBoxWrapper(LegacyInlineElementBox*);
     void deleteLineBoxWrapper();
 
-    LayoutRect clippedOverflowRect(const RenderLayerModelObject* repaintContainer, VisibleRectContext) const override;
-    std::optional<LayoutRect> computeVisibleRectInContainer(const LayoutRect&, const RenderLayerModelObject* container, VisibleRectContext) const override;
+    RepaintRects localRectsForRepaint(RepaintOutlineBounds) const override;
+    std::optional<RepaintRects> computeVisibleRectsInContainer(const RepaintRects&, const RenderLayerModelObject* container, VisibleRectContext) const override;
     void repaintDuringLayoutIfMoved(const LayoutRect&);
     virtual void repaintOverhangingFloats(bool paintAllDescendants);
 
@@ -550,9 +554,12 @@ public:
     LayoutUnit flipForWritingMode(LayoutUnit position) const; // The offset is in the block direction (y for horizontal writing modes, x for vertical writing modes).
     LayoutPoint flipForWritingMode(const LayoutPoint&) const;
     LayoutSize flipForWritingMode(const LayoutSize&) const;
-    void flipForWritingMode(LayoutRect&) const;
     FloatPoint flipForWritingMode(const FloatPoint&) const;
+
+    void flipForWritingMode(LayoutRect&) const;
     void flipForWritingMode(FloatRect&) const;
+    void flipForWritingMode(RepaintRects&) const;
+
     // These represent your location relative to your container as a physical offset.
     // In layout related methods you almost always want the logical location (e.g. x() and y()).
     LayoutPoint topLeftLocation() const
@@ -587,7 +594,7 @@ public:
 
     // Returns false if the rect has no intersection with the applied clip rect. When the context specifies edge-inclusive
     // intersection, this return value allows distinguishing between no intersection and zero-area intersection.
-    bool applyCachedClipAndScrollPosition(LayoutRect&, const RenderLayerModelObject* container, VisibleRectContext) const final;
+    bool applyCachedClipAndScrollPosition(RepaintRects&, const RenderLayerModelObject* container, VisibleRectContext) const final;
 
     virtual bool hasRelativeDimensions() const;
     virtual bool hasRelativeLogicalHeight() const;
@@ -657,8 +664,8 @@ public:
     bool computeHasTransformRelatedProperty(const RenderStyle&) const;
 
 protected:
-    RenderBox(Type, Element&, RenderStyle&&, BaseTypeFlags);
-    RenderBox(Type, Document&, RenderStyle&&, BaseTypeFlags);
+    RenderBox(Type, Element&, RenderStyle&&, OptionSet<TypeFlag> = { }, TypeSpecificFlags = { });
+    RenderBox(Type, Document&, RenderStyle&&, OptionSet<TypeFlag> = { }, TypeSpecificFlags = { });
 
     void styleWillChange(StyleDifference, const RenderStyle& newStyle) override;
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
@@ -690,6 +697,8 @@ protected:
     std::optional<LayoutUnit> computeIntrinsicLogicalContentHeightUsing(Length logicalHeightLength, std::optional<LayoutUnit> intrinsicContentHeight, LayoutUnit borderAndPadding) const;
     
     virtual bool shouldComputeSizeAsReplaced() const { return isReplacedOrInlineBlock() && !isInlineBlockOrInlineTable(); }
+
+    LayoutRect localOutlineBoundsRepaintRect() const;
 
     void mapLocalToContainer(const RenderLayerModelObject* ancestorContainer, TransformState&, OptionSet<MapCoordinatesMode>, bool* wasFixed) const override;
     const RenderObject* pushMappingToContainer(const RenderLayerModelObject*, RenderGeometryMap&) const override;
@@ -772,7 +781,7 @@ private:
 
     LayoutRect frameRectForStickyPositioning() const override { return frameRect(); }
 
-    LayoutRect computeVisibleRectUsingPaintOffset(const LayoutRect&) const;
+    RepaintRects computeVisibleRectsUsingPaintOffset(const RepaintRects&) const;
     
     LayoutPoint topLeftLocationWithFlipping() const;
 
@@ -804,8 +813,8 @@ private:
 
 inline RenderBox* RenderBox::parentBox() const
 {
-    if (is<RenderBox>(parent()))
-        return downcast<RenderBox>(parent());
+    if (auto* box = dynamicDowncast<RenderBox>(parent()))
+        return box;
 
     ASSERT(!parent());
     return nullptr;
@@ -813,8 +822,8 @@ inline RenderBox* RenderBox::parentBox() const
 
 inline RenderBox* RenderBox::firstChildBox() const
 {
-    if (is<RenderBox>(firstChild()))
-        return downcast<RenderBox>(firstChild());
+    if (auto* box = dynamicDowncast<RenderBox>(firstChild()))
+        return box;
 
     ASSERT(!firstChild());
     return nullptr;
@@ -827,8 +836,8 @@ inline RenderBox* RenderBox::firstInFlowChildBox() const
 
 inline RenderBox* RenderBox::lastChildBox() const
 {
-    if (is<RenderBox>(lastChild()))
-        return downcast<RenderBox>(lastChild());
+    if (auto* box = dynamicDowncast<RenderBox>(lastChild()))
+        return box;
 
     ASSERT(!lastChild());
     return nullptr;
@@ -841,8 +850,8 @@ inline RenderBox* RenderBox::lastInFlowChildBox() const
 
 inline RenderBox* RenderBox::previousSiblingBox() const
 {
-    if (is<RenderBox>(previousSibling()))
-        return downcast<RenderBox>(previousSibling());
+    if (auto* box = dynamicDowncast<RenderBox>(previousSibling()))
+        return box;
 
     ASSERT(!previousSibling());
     return nullptr;
@@ -859,8 +868,8 @@ inline RenderBox* RenderBox::previousInFlowSiblingBox() const
 
 inline RenderBox* RenderBox::nextSiblingBox() const
 {
-    if (is<RenderBox>(nextSibling()))
-        return downcast<RenderBox>(nextSibling());
+    if (auto* box = dynamicDowncast<RenderBox>(nextSibling()))
+        return box;
 
     ASSERT(!nextSibling());
     return nullptr;

@@ -22,15 +22,11 @@
 
 #if ENABLE(LAYER_BASED_SVG_ENGINE)
 
-#include "LegacyRenderSVGResource.h"
 #include "RenderSVGHiddenContainer.h"
 
 namespace WebCore {
 
-class RenderLayer;
-
-// FIXME: Get rid of LegacyRenderSVGResource inheritance.
-class RenderSVGResourceContainer : public RenderSVGHiddenContainer, public LegacyRenderSVGResource {
+class RenderSVGResourceContainer : public RenderSVGHiddenContainer {
     WTF_MAKE_ISO_ALLOCATED(RenderSVGResourceContainer);
 public:
     virtual ~RenderSVGResourceContainer();
@@ -38,15 +34,12 @@ public:
     void styleDidChange(StyleDifference, const RenderStyle* oldStyle) override;
 
     void idChanged();
+    void repaintAllClients() const;
 
 protected:
     RenderSVGResourceContainer(Type, SVGElement&, RenderStyle&&);
 
 private:
-    friend class SVGResourcesCache;
-    void addClient(RenderElement&);
-    void removeClient(RenderElement&);
-
     void willBeDestroyed() final;
     void registerResource();
 

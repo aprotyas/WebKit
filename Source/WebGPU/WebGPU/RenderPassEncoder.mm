@@ -37,15 +37,15 @@
 
 namespace WebGPU {
 
-constexpr auto startIndexForFragmentDynamicOffsets = 2;
-
-RenderPassEncoder::RenderPassEncoder(id<MTLRenderCommandEncoder> renderCommandEncoder, const WGPURenderPassDescriptor& descriptor, NSUInteger visibilityResultBufferSize, bool depthReadOnly, bool stencilReadOnly, CommandEncoder& parentEncoder, Device& device)
+RenderPassEncoder::RenderPassEncoder(id<MTLRenderCommandEncoder> renderCommandEncoder, const WGPURenderPassDescriptor& descriptor, NSUInteger visibilityResultBufferSize, bool depthReadOnly, bool stencilReadOnly, CommandEncoder& parentEncoder, id<MTLBuffer> visibilityResultBuffer, MTLRenderPassDescriptor* renderPassDescriptor, Device& device)
     : m_renderCommandEncoder(renderCommandEncoder)
     , m_device(device)
     , m_visibilityResultBufferSize(visibilityResultBufferSize)
     , m_depthReadOnly(depthReadOnly)
     , m_stencilReadOnly(stencilReadOnly)
-    , m_parentEncoder(&parentEncoder)
+    , m_parentEncoder(parentEncoder)
+    , m_visibilityResultBuffer(visibilityResultBuffer)
+    , m_renderPassDescriptor(renderPassDescriptor)
 {
     m_parentEncoder->lock(true);
 
@@ -56,11 +56,60 @@ RenderPassEncoder::RenderPassEncoder(id<MTLRenderCommandEncoder> renderCommandEn
             m_pendingTimestampWrites.append({ fromAPI(timestampWrite.querySet), timestampWrite.endOfPassWriteIndex });
         }
     }
+
+    m_attachmentsToClear = [NSMutableDictionary dictionary];
+    m_allColorAttachments = [NSMutableDictionary dictionary];
+    for (uint32_t i = 0; i < descriptor.colorAttachmentCount; ++i) {
+        const auto& attachment = descriptor.colorAttachments[i];
+        if (!attachment.view)
+            continue;
+
+        auto& texture = fromAPI(attachment.view);
+        m_renderTargetWidth = texture.width();
+        m_renderTargetHeight = texture.height();
+        texture.setPreviouslyCleared();
+
+        id<MTLTexture> textureToClear = texture.texture();
+        if (!textureToClear)
+            continue;
+        TextureAndClearColor *textureWithClearColor = [[TextureAndClearColor alloc] initWithTexture:textureToClear];
+        if (attachment.storeOp != WGPUStoreOp_Discard) {
+            auto& c = attachment.clearValue;
+            textureWithClearColor.clearColor = MTLClearColorMake(c.r, c.g, c.b, c.a);
+        } else
+            [m_attachmentsToClear setObject:textureWithClearColor forKey:@(i)];
+
+        [m_allColorAttachments setObject:textureWithClearColor forKey:@(i)];
+    }
+
+    if (const auto* attachment = descriptor.depthStencilAttachment) {
+        m_depthClearValue = attachment->depthStoreOp == WGPUStoreOp_Discard ? 0 : attachment->depthClearValue;
+        auto& textureView = fromAPI(attachment->view);
+        textureView.setPreviouslyCleared();
+        if (textureView.width() && !m_renderTargetWidth) {
+            m_renderTargetWidth = textureView.width();
+            m_renderTargetHeight = textureView.height();
+        }
+
+        id<MTLTexture> depthTexture = textureView.texture();
+        if (!Device::isStencilOnlyFormat(depthTexture.pixelFormat)) {
+            m_clearDepthAttachment = depthTexture && attachment->depthStoreOp == WGPUStoreOp_Discard;
+            m_depthStencilAttachmentToClear = depthTexture;
+        }
+
+        m_stencilClearValue = attachment->stencilStoreOp == WGPUStoreOp_Discard ? 0 : attachment->stencilClearValue;
+        if (Texture::stencilOnlyAspectMetalFormat(textureView.descriptor().format)) {
+            m_clearStencilAttachment = depthTexture && attachment->stencilStoreOp == WGPUStoreOp_Discard;
+            m_depthStencilAttachmentToClear = depthTexture;
+        }
+    }
 }
 
-RenderPassEncoder::RenderPassEncoder(Device& device)
+RenderPassEncoder::RenderPassEncoder(CommandEncoder& parentEncoder, Device& device)
     : m_device(device)
+    , m_parentEncoder(parentEncoder)
 {
+    m_parentEncoder->lock(true);
 }
 
 RenderPassEncoder::~RenderPassEncoder()
@@ -74,15 +123,16 @@ void RenderPassEncoder::beginOcclusionQuery(uint32_t queryIndex)
     if (queryIndex < m_visibilityResultBufferSize) {
         m_visibilityResultBufferOffset = queryIndex;
         [m_renderCommandEncoder setVisibilityResultMode:MTLVisibilityResultModeCounting offset:queryIndex];
+        m_queryBufferIndicesToClear.add(m_visibilityResultBufferOffset);
     }
 }
 
 static void setViewportMinMaxDepthIntoBuffer(auto& fragmentDynamicOffsets, float minDepth, float maxDepth)
 {
     static_assert(sizeof(fragmentDynamicOffsets[0]) == sizeof(minDepth), "expect dynamic offsets container to have matching size to depth values");
-    static_assert(startIndexForFragmentDynamicOffsets == 2, "code path assumes value is 2");
-    if (fragmentDynamicOffsets.size() < startIndexForFragmentDynamicOffsets)
-        fragmentDynamicOffsets.grow(startIndexForFragmentDynamicOffsets);
+    static_assert(RenderBundleEncoder::startIndexForFragmentDynamicOffsets > 1, "code path assumes value is 2 or more");
+    if (fragmentDynamicOffsets.size() < RenderBundleEncoder::startIndexForFragmentDynamicOffsets)
+        fragmentDynamicOffsets.grow(RenderBundleEncoder::startIndexForFragmentDynamicOffsets);
 
     using destType = typename std::remove_reference<decltype(fragmentDynamicOffsets[0])>::type;
     fragmentDynamicOffsets[0] = bitwise_cast<destType>(minDepth);
@@ -93,6 +143,9 @@ void RenderPassEncoder::executePreDrawCommands()
 {
     if (!m_pipeline)
         return;
+
+    m_issuedDrawCall = true;
+    m_queryBufferIndicesToClear.remove(m_visibilityResultBufferOffset);
 
     for (auto& kvp : m_bindGroupDynamicOffsets) {
         auto& pipelineLayout = m_pipeline->pipelineLayout();
@@ -111,7 +164,7 @@ void RenderPassEncoder::executePreDrawCommands()
             auto& fragmentOffsets = *pfragmentOffsets;
             auto startIndex = pipelineLayout.fragmentOffsetForBindGroup(bindGroupIndex);
             RELEASE_ASSERT(fragmentOffsets.size() <= m_fragmentDynamicOffsets.size() + startIndex);
-            memcpy(&m_fragmentDynamicOffsets[startIndex + startIndexForFragmentDynamicOffsets], &fragmentOffsets[0], sizeof(fragmentOffsets[0]) * fragmentOffsets.size());
+            memcpy(&m_fragmentDynamicOffsets[startIndex + RenderBundleEncoder::startIndexForFragmentDynamicOffsets], &fragmentOffsets[0], sizeof(fragmentOffsets[0]) * fragmentOffsets.size());
         }
     }
 
@@ -173,8 +226,9 @@ void RenderPassEncoder::endOcclusionQuery()
 
 void RenderPassEncoder::endPass()
 {
-    if (!m_parentEncoder) {
-        ASSERT(!m_renderCommandEncoder);
+    if (m_debugGroupStackSize || !isValid()) {
+        [m_renderCommandEncoder endEncoding];
+        m_parentEncoder->makeInvalid();
         return;
     }
 
@@ -182,14 +236,43 @@ void RenderPassEncoder::endPass()
     for (const auto& pendingTimestampWrite : m_pendingTimestampWrites)
         [m_renderCommandEncoder sampleCountersInBuffer:pendingTimestampWrite.querySet->counterSampleBuffer() atSampleIndex:pendingTimestampWrite.queryIndex withBarrier:NO];
     m_pendingTimestampWrites.clear();
-    [m_renderCommandEncoder endEncoding];
+
+    auto endEncoder = ^{
+        [m_renderCommandEncoder endEncoding];
+    };
+
+    if (m_issuedDrawCall)
+        endEncoder();
+
+    if (m_attachmentsToClear.count || !m_issuedDrawCall || (m_depthStencilAttachmentToClear && (m_clearDepthAttachment || m_clearStencilAttachment))) {
+        if (m_depthStencilAttachmentToClear && !m_issuedDrawCall) {
+            auto pixelFormat = m_depthStencilAttachmentToClear.pixelFormat;
+            m_clearDepthAttachment = !Device::isStencilOnlyFormat(pixelFormat);
+            m_clearStencilAttachment = pixelFormat == MTLPixelFormatDepth32Float_Stencil8 || pixelFormat == MTLPixelFormatStencil8 || pixelFormat == MTLPixelFormatX32_Stencil8;
+        }
+        m_parentEncoder->runClearEncoder(m_issuedDrawCall ? m_attachmentsToClear : m_allColorAttachments, m_depthStencilAttachmentToClear, m_clearDepthAttachment, m_clearStencilAttachment, m_depthClearValue, m_stencilClearValue, m_issuedDrawCall ? nil : m_renderCommandEncoder);
+    }
+
     m_renderCommandEncoder = nil;
+    m_renderPassDescriptor = nil;
 
     m_parentEncoder->lock(false);
+
+    if (m_queryBufferIndicesToClear.size()) {
+        id<MTLBlitCommandEncoder> blitCommandEncoder = m_parentEncoder->ensureBlitCommandEncoder();
+        for (auto& offset : m_queryBufferIndicesToClear)
+            [blitCommandEncoder fillBuffer:m_visibilityResultBuffer range:NSMakeRange(static_cast<NSUInteger>(offset), sizeof(uint64_t)) value:0];
+
+        m_queryBufferIndicesToClear.clear();
+        m_parentEncoder->finalizeBlitCommandEncoder();
+    }
+
 }
 
 void RenderPassEncoder::executeBundles(Vector<std::reference_wrapper<RenderBundle>>&& bundles)
 {
+    m_queryBufferIndicesToClear.remove(m_visibilityResultBufferOffset);
+
     for (auto& bundle : bundles) {
         auto& renderBundle = bundle.get();
         renderBundle.updateMinMaxDepths(m_minDepth, m_maxDepth);
@@ -208,6 +291,7 @@ void RenderPassEncoder::executeBundles(Vector<std::reference_wrapper<RenderBundl
             }
 
             id<MTLIndirectCommandBuffer> indirectCommandBuffer = icb.indirectCommandBuffer;
+            m_issuedDrawCall = true;
             [m_renderCommandEncoder executeCommandsInBuffer:indirectCommandBuffer withRange:NSMakeRange(0, indirectCommandBuffer.size)];
         }
 
@@ -237,6 +321,7 @@ void RenderPassEncoder::makeInvalid()
 {
     [m_renderCommandEncoder endEncoding];
     m_renderCommandEncoder = nil;
+    m_renderPassDescriptor = nil;
 }
 
 void RenderPassEncoder::popDebugGroup()
@@ -269,7 +354,7 @@ void RenderPassEncoder::pushDebugGroup(String&& groupLabel)
 void RenderPassEncoder::setBindGroup(uint32_t groupIndex, const BindGroup& group, uint32_t dynamicOffsetCount, const uint32_t* dynamicOffsets)
 {
     if (dynamicOffsetCount)
-        m_bindGroupDynamicOffsets.add(groupIndex, Vector<uint32_t>(dynamicOffsets, dynamicOffsetCount));
+        m_bindGroupDynamicOffsets.set(groupIndex, Vector<uint32_t>(dynamicOffsets, dynamicOffsetCount));
 
     for (const auto& resource : group.resources()) {
         if (resource.renderStages & (MTLRenderStageVertex | MTLRenderStageFragment))
@@ -303,14 +388,21 @@ void RenderPassEncoder::setPipeline(const RenderPipeline& pipeline)
         return;
     }
 
-    if (!pipeline.validateDepthStencilState(m_depthReadOnly, m_stencilReadOnly))
+    if (!pipeline.validateDepthStencilState(m_depthReadOnly, m_stencilReadOnly)) {
+        makeInvalid();
         return;
+    }
 
     m_primitiveType = pipeline.primitiveType();
     m_pipeline = &pipeline;
 
     m_vertexDynamicOffsets.resize(pipeline.pipelineLayout().sizeOfVertexDynamicOffsets());
-    m_fragmentDynamicOffsets.resize(pipeline.pipelineLayout().sizeOfFragmentDynamicOffsets() + startIndexForFragmentDynamicOffsets);
+    m_fragmentDynamicOffsets.resize(pipeline.pipelineLayout().sizeOfFragmentDynamicOffsets() + RenderBundleEncoder::startIndexForFragmentDynamicOffsets);
+
+    if (!pipeline.colorTargetsMatch(m_renderPassDescriptor.colorAttachments, m_allColorAttachments.count) || !pipeline.depthAttachmentMatches(m_renderPassDescriptor.depthAttachment) || !pipeline.stencilAttachmentMatches(m_renderPassDescriptor.stencilAttachment)) {
+        makeInvalid();
+        return;
+    }
 
     if (pipeline.renderPipelineState())
         [m_renderCommandEncoder setRenderPipelineState:pipeline.renderPipelineState()];
@@ -320,12 +412,15 @@ void RenderPassEncoder::setPipeline(const RenderPipeline& pipeline)
     [m_renderCommandEncoder setFrontFacingWinding:pipeline.frontFace()];
     [m_renderCommandEncoder setDepthClipMode:pipeline.depthClipMode()];
     [m_renderCommandEncoder setDepthBias:pipeline.depthBias() slopeScale:pipeline.depthBiasSlopeScale() clamp:pipeline.depthBiasClamp()];
+    if (m_fragmentDynamicOffsets.size() < RenderBundleEncoder::startIndexForFragmentDynamicOffsets)
+        m_fragmentDynamicOffsets.grow(RenderBundleEncoder::startIndexForFragmentDynamicOffsets);
+    static_assert(RenderBundleEncoder::startIndexForFragmentDynamicOffsets > 2, "code path assumes value is greater than 2");
+    m_fragmentDynamicOffsets[2] = pipeline.sampleMask();
 }
 
 void RenderPassEncoder::setScissorRect(uint32_t x, uint32_t y, uint32_t width, uint32_t height)
 {
-    // FIXME: Validate according to https://www.w3.org/TR/webgpu/#dom-gpurenderpassencoder-setscissorrect
-    [m_renderCommandEncoder setScissorRect: { x, y, width, height } ];
+    [m_renderCommandEncoder setScissorRect: { x, y, std::min(width, m_renderTargetWidth), std::min(height, m_renderTargetHeight) } ];
 }
 
 void RenderPassEncoder::setStencilReference(uint32_t reference)

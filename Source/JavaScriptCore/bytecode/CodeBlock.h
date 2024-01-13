@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2008-2023 Apple Inc. All rights reserved.
+ * Copyright (C) 2008-2024 Apple Inc. All rights reserved.
  * Copyright (C) 2008 Cameron Zwarich <cwzwarich@uwaterloo.ca>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -244,7 +244,8 @@ public:
     unsigned lineNumberForBytecodeIndex(BytecodeIndex);
     unsigned columnNumberForBytecodeIndex(BytecodeIndex);
     void expressionRangeForBytecodeIndex(BytecodeIndex, unsigned& divot,
-        unsigned& startOffset, unsigned& endOffset, unsigned& line, unsigned& column) const;
+        unsigned& startOffset, unsigned& endOffset, LineColumn&) const;
+    LineColumn lineColumnForBytecodeIndex(BytecodeIndex) const;
 
     std::optional<BytecodeIndex> bytecodeIndexFromCallSiteIndex(CallSiteIndex);
 
@@ -282,7 +283,7 @@ public:
 #endif // ENABLE(JIT)
 
     void unlinkIncomingCalls();
-    void linkIncomingCall(CallFrame* callerFrame, CallLinkInfoBase*);
+    void linkIncomingCall(JSCell* caller, CallFrame* callerFrame, CallLinkInfoBase*, bool skipFirstFrame = false);
 
     const JSInstruction* outOfLineJumpTarget(const JSInstruction* pc);
     int outOfLineJumpOffset(JSInstructionStream::Offset offset)
@@ -319,7 +320,7 @@ public:
     // Exactly equivalent to codeBlock->ownerExecutable()->newReplacementCodeBlockFor(codeBlock->specializationKind())
     CodeBlock* newReplacement();
     
-    void setJITCode(Ref<JITCode>&& code)
+    void setJITCode(Ref<JSC::JITCode>&& code)
     {
         if (!code->isShared())
             heap()->reportExtraMemoryAllocated(this, code->size());
@@ -329,12 +330,12 @@ public:
         m_jitCode = WTFMove(code);
     }
 
-    RefPtr<JITCode> jitCode() { return m_jitCode; }
+    RefPtr<JSC::JITCode> jitCode() { return m_jitCode; }
     static ptrdiff_t jitCodeOffset() { return OBJECT_OFFSETOF(CodeBlock, m_jitCode); }
     JITType jitType() const
     {
-        JITCode* jitCode = m_jitCode.get();
-        JITType result = JITCode::jitTypeFor(jitCode);
+        auto* jitCode = m_jitCode.get();
+        JITType result = JSC::JITCode::jitTypeFor(jitCode);
         return result;
     }
 
@@ -440,7 +441,7 @@ public:
     // Having code origins implies that there has been some inlining.
     bool hasCodeOrigins()
     {
-        return JITCode::isOptimizingJIT(jitType());
+        return JSC::JITCode::isOptimizingJIT(jitType());
     }
         
     bool canGetCodeOrigin(CallSiteIndex index)
@@ -504,7 +505,7 @@ public:
     
     const BitVector& bitVector(size_t i) { return m_unlinkedCode->bitVector(i); }
 
-    Heap* heap() const { return &m_vm->heap; }
+    JSC::Heap* heap() const { return &m_vm->heap; }
     JSGlobalObject* globalObject() { return m_globalObject.get(); }
 
     static ptrdiff_t offsetOfGlobalObject() { return OBJECT_OFFSETOF(CodeBlock, m_globalObject); }
@@ -531,7 +532,7 @@ public:
     }
     BaselineJITData* baselineJITData()
     {
-        if (!JITCode::isOptimizingJIT(jitType()))
+        if (!JSC::JITCode::isOptimizingJIT(jitType()))
             return bitwise_cast<BaselineJITData*>(m_jitData);
         return nullptr;
     }
@@ -546,7 +547,7 @@ public:
 
     DFG::JITData* dfgJITData()
     {
-        if (JITCode::isOptimizingJIT(jitType()))
+        if (JSC::JITCode::isOptimizingJIT(jitType()))
             return bitwise_cast<DFG::JITData*>(m_jitData);
         return nullptr;
     }
@@ -880,7 +881,7 @@ private:
     
     CodeBlock* specialOSREntryBlockOrNull();
     
-    void noticeIncomingCall(CallFrame* callerFrame);
+    void noticeIncomingCall(JSCell* caller, CallFrame* callerFrame, bool skipFirstFrame);
 
     void updateAllNonLazyValueProfilePredictionsAndCountLiveness(const ConcurrentJSLocker&, unsigned& numberOfLiveNonArgumentValueProfiles, unsigned& numberOfSamplesInProfiles);
 
@@ -952,9 +953,11 @@ private:
     VM* const m_vm;
 
     const void* const m_instructionsRawPointer { nullptr };
-    SentinelLinkedList<CallLinkInfoBase, PackedRawSentinelNode<CallLinkInfoBase>> m_incomingCalls;
+    SentinelLinkedList<CallLinkInfoBase, BasicRawSentinelNode<CallLinkInfoBase>> m_incomingCalls;
+    uint16_t m_optimizationDelayCounter { 0 };
+    uint16_t m_reoptimizationRetryCounter { 0 };
     StructureWatchpointMap m_llintGetByIdWatchpointMap;
-    RefPtr<JITCode> m_jitCode;
+    RefPtr<JSC::JITCode> m_jitCode;
 #if ENABLE(JIT)
 public:
     void* m_jitData { nullptr };
@@ -980,11 +983,9 @@ private:
 
     BaselineExecutionCounter m_jitExecuteCounter;
 
-    uint16_t m_optimizationDelayCounter { 0 };
-    uint16_t m_reoptimizationRetryCounter { 0 };
+    float m_previousCounter { 0 };
 
     ApproximateTime m_creationTime;
-    double m_previousCounter { 0 };
 
     std::unique_ptr<RareData> m_rareData;
 
@@ -995,7 +996,7 @@ private:
 };
 /* This check is for normal Release builds; ASSERT_ENABLED changes the size. */
 #if defined(NDEBUG) && !defined(ASSERT_ENABLED) && COMPILER(GCC_COMPATIBLE)
-static_assert(sizeof(CodeBlock) <= 240, "Keep it small for memory saving");
+static_assert(sizeof(CodeBlock) <= 224, "Keep it small for memory saving");
 #endif
 
 template <typename ExecutableType>

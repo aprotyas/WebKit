@@ -309,22 +309,37 @@ void PluginView::manualLoadDidFail()
     m_plugin->streamDidFail();
 }
 
-void PluginView::pageScaleFactorDidChange()
-{
-    viewGeometryDidChange();
-}
-
 void PluginView::topContentInsetDidChange()
 {
     viewGeometryDidChange();
 }
 
-void PluginView::setPageScaleFactor(double scaleFactor)
+void PluginView::didBeginMagnificationGesture()
+{
+    if (!m_isInitialized)
+        return;
+
+    m_plugin->didBeginMagnificationGesture();
+}
+
+void PluginView::didEndMagnificationGesture()
+{
+    if (!m_isInitialized)
+        return;
+
+    m_plugin->didEndMagnificationGesture();
+}
+
+void PluginView::setPageScaleFactor(double scaleFactor, std::optional<IntPoint> origin)
 {
     m_pageScaleFactor = scaleFactor;
     m_webPage->send(Messages::WebPageProxy::PluginScaleFactorDidChange(scaleFactor));
     m_webPage->send(Messages::WebPageProxy::PluginZoomFactorDidChange(scaleFactor));
-    pageScaleFactorDidChange();
+
+    if (!m_isInitialized)
+        return;
+
+    m_plugin->setPageScaleFactor(scaleFactor, origin);
 }
 
 double PluginView::pageScaleFactor() const
@@ -344,7 +359,7 @@ void PluginView::setDeviceScaleFactor(float scaleFactor)
     if (!m_isInitialized)
         return;
 
-    m_plugin->contentsScaleFactorChanged(scaleFactor);
+    m_plugin->deviceScaleFactorChanged(scaleFactor);
 }
 
 id PluginView::accessibilityAssociatedPluginParentForElement(Element* element) const
@@ -393,6 +408,11 @@ void PluginView::initializePlugin()
         if (frame->isMainFrame() && m_plugin->isFullFramePlugin())
             WebFrame::fromCoreFrame(*frame)->page()->send(Messages::WebPageProxy::MainFramePluginHandlesPageScaleGestureDidChange(true));
     }
+}
+
+Ref<PDFPluginBase> PluginView::protectedPlugin() const
+{
+    return m_plugin;
 }
 
 PluginLayerHostingStrategy PluginView::layerHostingStrategy() const
@@ -462,12 +482,7 @@ Scrollbar* PluginView::horizontalScrollbar()
     if (!m_isInitialized)
         return nullptr;
 
-#if ENABLE(LEGACY_PDFKIT_PLUGIN)
-    if (is<PDFPlugin>(m_plugin))
-        return downcast<PDFPlugin>(m_plugin)->horizontalScrollbar();
-#endif
-
-    return nullptr;
+    return m_plugin->horizontalScrollbar();
 }
 
 Scrollbar* PluginView::verticalScrollbar()
@@ -475,12 +490,7 @@ Scrollbar* PluginView::verticalScrollbar()
     if (!m_isInitialized)
         return nullptr;
 
-#if ENABLE(LEGACY_PDFKIT_PLUGIN)
-    if (is<PDFPlugin>(m_plugin))
-        return downcast<PDFPlugin>(m_plugin)->verticalScrollbar();
-#endif
-
-    return nullptr;
+    return m_plugin->verticalScrollbar();
 }
 
 bool PluginView::wantsWheelEvents()
@@ -509,9 +519,7 @@ void PluginView::paint(GraphicsContext& context, const IntRect& dirtyRect, Widge
     }
 
     // FIXME: We should try to intersect the dirty rect with the plug-in's clip rect here.
-    IntRect paintRect = IntRect(IntPoint(), frameRect().size());
-
-    if (paintRect.isEmpty())
+    if (frameRect().isEmpty())
         return;
 
     if (m_transientPaintingSnapshot) {
@@ -529,7 +537,28 @@ void PluginView::paint(GraphicsContext& context, const IntRect& dirtyRect, Widge
         return;
     }
 
-    m_plugin->paint(context, dirtyRect);
+    bool isSnapshotting = [&]() {
+        auto* frameView = frame()->view();
+        if (!frameView)
+            return false;
+
+        return frameView->paintBehavior().contains(PaintBehavior::FlattenCompositingLayers);
+    }();
+
+    if (!isSnapshotting && m_plugin->layerHostingStrategy() == PluginLayerHostingStrategy::GraphicsLayer)
+        return;
+
+    // RenderWidget::paintContents() translated the context so the origin is aligned with frameRect().location().
+    // Shift it back to align with the plugin origin.
+    GraphicsContextStateSaver stateSaver(context);
+
+    auto widgetOrigin = frameRect().location();
+    context.translate(widgetOrigin);
+
+    auto paintRect = dirtyRect;
+    paintRect.moveBy(-widgetOrigin);
+
+    protectedPlugin()->paint(context, paintRect);
 }
 
 void PluginView::frameRectsChanged()
@@ -597,7 +626,7 @@ void PluginView::handleEvent(Event& event)
             frame->eventHandler().setCapturingMouseEventsElement(nullptr);
 
         didHandleEvent = m_plugin->handleMouseEvent(static_cast<const WebMouseEvent&>(*currentEvent));
-    } else if (eventNames().isWheelEventType(event.type()) && currentEvent->type() == WebEventType::Wheel)
+    } else if ((event.type() == eventNames().wheelEvent || event.type() == eventNames().mousewheelEvent) && currentEvent->type() == WebEventType::Wheel)
         didHandleEvent = m_plugin->handleWheelEvent(static_cast<const WebWheelEvent&>(*currentEvent));
     else if (event.type() == eventNames().mouseoverEvent && currentEvent->type() == WebEventType::MouseMove)
         didHandleEvent = m_plugin->handleMouseEnterEvent(static_cast<const WebMouseEvent&>(*currentEvent));
@@ -613,12 +642,12 @@ void PluginView::handleEvent(Event& event)
         event.setDefaultHandled();
 }
 
-bool PluginView::handleEditingCommand(const String& commandName, const String&)
+bool PluginView::handleEditingCommand(const String& commandName, const String& argument)
 {
     if (!m_isInitialized)
         return false;
 
-    return m_plugin->handleEditingCommand(commandName);
+    return m_plugin->handleEditingCommand(commandName, argument);
 }
     
 bool PluginView::isEditingCommandEnabled(const String& commandName)
@@ -640,6 +669,23 @@ void PluginView::willDetachRenderer()
         return;
 
     m_plugin->willDetachRenderer();
+}
+
+bool PluginView::usesAsyncScrolling() const
+{
+    if (!m_isInitialized)
+        return false;
+
+    return m_plugin->usesAsyncScrolling();
+}
+
+
+ScrollingNodeID PluginView::scrollingNodeID() const
+{
+    if (!m_isInitialized)
+        return 0;
+
+    return m_plugin->scrollingNodeID();
 }
 
 RefPtr<FragmentedSharedBuffer> PluginView::liveResourceData() const
@@ -818,6 +864,11 @@ void PluginView::redeliverManualStream()
         manualLoadDidFinishLoading();
 }
 
+CheckedPtr<RenderEmbeddedObject> PluginView::checkedRenderer() const
+{
+    return dynamicDowncast<RenderEmbeddedObject>(m_pluginElement->renderer());
+}
+
 void PluginView::invalidateRect(const IntRect& dirtyRect)
 {
     if (!parent() || !m_isInitialized)
@@ -828,13 +879,12 @@ void PluginView::invalidateRect(const IntRect& dirtyRect)
         return;
 #endif
 
-    auto* renderer = m_pluginElement->renderer();
-    if (!is<RenderEmbeddedObject>(renderer))
+    CheckedPtr renderer = checkedRenderer();
+    if (!renderer)
         return;
-    auto& object = downcast<RenderEmbeddedObject>(*renderer);
 
-    IntRect contentRect(dirtyRect);
-    contentRect.move(object.borderLeft() + object.paddingLeft(), object.borderTop() + object.paddingTop());
+    auto contentRect = dirtyRect;
+    contentRect.move(renderer->borderLeft() + renderer->paddingLeft(), renderer->borderTop() + renderer->paddingTop());
     renderer->repaintRectangle(contentRect);
 }
 
@@ -862,7 +912,7 @@ bool PluginView::shouldCreateTransientPaintingSnapshot() const
         }
     }
 
-    return true;
+    return m_plugin->shouldCreateTransientPaintingSnapshot();
 }
 
 bool PluginView::isBeingDestroyed() const

@@ -278,7 +278,7 @@ private:
         return dummy.get();
     }
 
-    CheckedRef<WebProcessProxy> m_process;
+    WeakRef<WebProcessProxy> m_process;
 };
 #endif
 
@@ -390,7 +390,9 @@ void WebProcessProxy::setIsInProcessCache(bool value, WillShutDown willShutDown)
     if (willShutDown == WillShutDown::Yes)
         return;
 
-    send(Messages::WebProcess::SetIsInProcessCache(m_isInProcessCache), 0);
+    // The WebProcess might be task_suspended at this point, so use sendWithAsyncReply to resume
+    // the process via a background activity long enough to process the IPC if necessary.
+    sendWithAsyncReply(Messages::WebProcess::SetIsInProcessCache(m_isInProcessCache), []() { });
 
     if (m_isInProcessCache) {
         // WebProcessProxy objects normally keep the process pool alive but we do not want this to be the case
@@ -406,15 +408,12 @@ void WebProcessProxy::setWebsiteDataStore(WebsiteDataStore& dataStore)
 {
     ASSERT(!m_websiteDataStore);
     WEBPROCESSPROXY_RELEASE_LOG(Process, "setWebsiteDataStore() dataStore=%p, sessionID=%" PRIu64, &dataStore, dataStore.sessionID().toUInt64());
+#if PLATFORM(COCOA)
+    if (!m_websiteDataStore)
+        dataStore.protectedNetworkProcess()->sendXPCEndpointToProcess(*this);
+#endif
     m_websiteDataStore = &dataStore;
     logger().setEnabled(this, dataStore.sessionID().isAlwaysOnLoggingAllowed());
-#if PLATFORM(COCOA)
-    if (m_networkProcessToKeepAliveUntilDataStoreIsCreated) {
-        Ref networkProcess = m_websiteDataStore->networkProcess(); // Transfer ownership of the NetworkProcessProxy to the WebsiteDataStore.
-        ASSERT_UNUSED(networkProcess, m_networkProcessToKeepAliveUntilDataStoreIsCreated == networkProcess.ptr());
-        m_networkProcessToKeepAliveUntilDataStoreIsCreated = nullptr;
-    }
-#endif
     updateRegistrationWithDataStore();
     send(Messages::WebProcess::SetWebsiteDataStoreParameters(processPool().webProcessDataStoreParameters(*this, dataStore)), 0);
 
@@ -713,7 +712,6 @@ RefPtr<WebPageProxy> WebProcessProxy::webPageWithActiveXRSession()
 }
 #endif
 
-#if ENABLE(TRACKING_PREVENTION)
 void WebProcessProxy::notifyPageStatisticsAndDataRecordsProcessed()
 {
     for (Ref page : globalPages())
@@ -736,7 +734,6 @@ void WebProcessProxy::setThirdPartyCookieBlockingMode(ThirdPartyCookieBlockingMo
 {
     sendWithAsyncReply(Messages::WebProcess::SetThirdPartyCookieBlockingMode(thirdPartyCookieBlockingMode), WTFMove(completionHandler));
 }
-#endif
 
 Ref<WebPageProxy> WebProcessProxy::createWebPage(PageClient& pageClient, Ref<API::PageConfiguration>&& pageConfiguration)
 {
@@ -806,7 +803,7 @@ void WebProcessProxy::addExistingWebPage(WebPageProxy& webPage, BeginsUsingDataS
 
     updateRegistrationWithDataStore();
     updateBackgroundResponsivenessTimer();
-    updateBlobRegistryPartitioningState();
+    websiteDataStore()->updateBlobRegistryPartitioningState();
 
     // If this was previously a standalone worker process with no pages we need to call didChangeThrottleState()
     // to update our process assertions on the network process since standalone worker processes do not hold
@@ -845,7 +842,7 @@ void WebProcessProxy::removeWebPage(WebPageProxy& webPage, EndsUsingDataStore en
     updateAudibleMediaAssertions();
     updateMediaStreamingActivity();
     updateBackgroundResponsivenessTimer();
-    updateBlobRegistryPartitioningState();
+    websiteDataStore()->updateBlobRegistryPartitioningState();
 
     maybeShutDown();
 }
@@ -1164,6 +1161,9 @@ void WebProcessProxy::processDidTerminateOrFailedToLaunch(ProcessTerminationReas
 
     for (auto& page : pages)
         page->dispatchProcessDidTerminate(reason);
+
+    for (auto& remotePage : m_remotePages)
+        remotePage.processDidTerminate(coreProcessIdentifier());
 }
 
 void WebProcessProxy::didReceiveInvalidMessage(IPC::Connection& connection, IPC::MessageName messageName)
@@ -1257,15 +1257,6 @@ void WebProcessProxy::didFinishLaunching(ProcessLauncher* launcher, IPC::Connect
 #if PLATFORM(COCOA)
     if (m_websiteDataStore)
         m_websiteDataStore->protectedNetworkProcess()->sendXPCEndpointToProcess(*this);
-    else {
-        // Prewarmed web processes don't have a data store but still need a network process to launch properly
-        // because the network process needs to send it the launch services database. Since the data store
-        // normally keeps the network process alive, we stash it in m_networkProcessToKeepAliveUntilDataStoreIsCreated
-        // until the prewarmed web process gets assigned a data store.
-        Ref networkProcess = NetworkProcessProxy::ensureDefaultNetworkProcess();
-        m_networkProcessToKeepAliveUntilDataStoreIsCreated = networkProcess.copyRef();
-        networkProcess->sendXPCEndpointToProcess(*this);
-    }
 #endif
 
     RELEASE_ASSERT(!m_webConnection);
@@ -1330,12 +1321,14 @@ bool WebProcessProxy::wasPreviouslyApprovedFileURL(const URL& url) const
     return m_previouslyApprovedFilePaths.contains(fileSystemPath);
 }
 
-void WebProcessProxy::recordUserGestureAuthorizationToken(WTF::UUID authorizationToken)
+void WebProcessProxy::recordUserGestureAuthorizationToken(PageIdentifier pageID, WTF::UUID authorizationToken)
 {
     if (!UserInitiatedActionByAuthorizationTokenMap::isValidKey(authorizationToken) || !authorizationToken)
         return;
 
-    m_userInitiatedActionByAuthorizationTokenMap.ensure(authorizationToken, [authorizationToken] {
+    m_userInitiatedActionByAuthorizationTokenMap.ensure(pageID, [] {
+        return UserInitiatedActionByAuthorizationTokenMap { };
+    }).iterator->value.ensure(authorizationToken, [authorizationToken] {
         Ref action = API::UserInitiatedAction::create();
         action->setAuthorizationToken(authorizationToken);
         return action;
@@ -1351,28 +1344,36 @@ RefPtr<API::UserInitiatedAction> WebProcessProxy::userInitiatedActivity(uint64_t
     return result.iterator->value;
 }
 
-RefPtr<API::UserInitiatedAction> WebProcessProxy::userInitiatedActivity(std::optional<WTF::UUID> authorizationToken, uint64_t identifier)
+RefPtr<API::UserInitiatedAction> WebProcessProxy::userInitiatedActivity(PageIdentifier pageID, std::optional<WTF::UUID> authorizationToken, uint64_t identifier)
 {
     if (!UserInitiatedActionMap::isValidKey(identifier) || !identifier)
         return nullptr;
 
     if (authorizationToken) {
-        auto it = m_userInitiatedActionByAuthorizationTokenMap.find(*authorizationToken);
-        if (it != m_userInitiatedActionByAuthorizationTokenMap.end()) {
-            auto result = m_userInitiatedActionMap.ensure(identifier, [it] {
-                return it->value;
-            });
-            return result.iterator->value;
+        auto authorizationTokenMapByPageIterator = m_userInitiatedActionByAuthorizationTokenMap.find(pageID);
+        if (authorizationTokenMapByPageIterator != m_userInitiatedActionByAuthorizationTokenMap.end()) {
+            auto it = authorizationTokenMapByPageIterator->value.find(*authorizationToken);
+            if (it != authorizationTokenMapByPageIterator->value.end()) {
+                auto result = m_userInitiatedActionMap.ensure(identifier, [it] {
+                    return it->value;
+                });
+                return result.iterator->value;
+            }
         }
     }
 
     return userInitiatedActivity(identifier);
 }
 
-void WebProcessProxy::consumeIfNotVerifiablyFromUIProcess(API::UserInitiatedAction& action, std::optional<WTF::UUID> authToken)
+void WebProcessProxy::consumeIfNotVerifiablyFromUIProcess(PageIdentifier pageID, API::UserInitiatedAction& action, std::optional<WTF::UUID> authToken)
 {
-    if (authToken && m_userInitiatedActionByAuthorizationTokenMap.remove(*authToken))
-        return;
+    auto authorizationTokenMapByPageIterator = m_userInitiatedActionByAuthorizationTokenMap.find(pageID);
+    if (authorizationTokenMapByPageIterator != m_userInitiatedActionByAuthorizationTokenMap.end()) {
+        if (authToken && authorizationTokenMapByPageIterator->value.contains(*authToken)) {
+            m_userInitiatedActionByAuthorizationTokenMap.remove(authorizationTokenMapByPageIterator);
+            return;
+        }
+    }
     action.setConsumed();
 }
 
@@ -1381,58 +1382,17 @@ bool WebProcessProxy::isResponsive() const
     return responsivenessTimer().isResponsive() && m_backgroundResponsivenessTimer.isResponsive();
 }
 
-void WebProcessProxy::didDestroyUserGestureToken(uint64_t identifier)
+void WebProcessProxy::didDestroyUserGestureToken(PageIdentifier pageID, uint64_t identifier)
 {
     ASSERT(UserInitiatedActionMap::isValidKey(identifier));
-    if (auto removed = m_userInitiatedActionMap.take(identifier); removed && removed->authorizationToken())
-        m_userInitiatedActionByAuthorizationTokenMap.remove(*removed->authorizationToken());
-}
-
-void WebProcessProxy::postMessageToRemote(WebCore::FrameIdentifier identifier, std::optional<WebCore::SecurityOriginData> target, const WebCore::MessageWithMessagePorts& message)
-{
-    if (RefPtr destinationFrame = WebFrameProxy::webFrame(identifier))
-        destinationFrame->protectedProcess()->send(Messages::WebProcess::RemotePostMessage(identifier, target, message), 0);
-}
-
-void WebProcessProxy::closeRemoteFrame(WebCore::FrameIdentifier frameID)
-{
-    // FIXME: <rdar://117383252> This, postMessageToRemote, renderTreeAsText, etc. should be messages to the WebPageProxy instead of the process.
-    // They are more the page doing things than the process.
-    RefPtr destinationFrame = WebFrameProxy::webFrame(frameID);
-    if (!destinationFrame || !destinationFrame->isMainFrame())
-        return;
-    if (RefPtr page = destinationFrame->page())
-        page->closePage();
-}
-
-void WebProcessProxy::focusRemoteFrame(WebCore::FrameIdentifier frameID)
-{
-    // FIXME: <rdar://117383252> This, postMessageToRemote, renderTreeAsText, etc. should be messages to the WebPageProxy instead of the process.
-    // They are more the page doing things than the process.
-    RefPtr destinationFrame = WebFrameProxy::webFrame(frameID);
-    if (!destinationFrame || !destinationFrame->isMainFrame())
-        return;
-
-    RefPtr page = destinationFrame->page();
-    if (!page)
-        return;
-
-    page->broadcastFocusedFrameToOtherProcesses(*connection(), frameID);
-    page->setFocus(true);
-}
-
-void WebProcessProxy::renderTreeAsText(WebCore::FrameIdentifier frameIdentifier, size_t baseIndent, OptionSet<WebCore::RenderAsTextFlag> behavior, CompletionHandler<void(String&&)>&& completionHandler)
-{
-    RefPtr frame = WebFrameProxy::webFrame(frameIdentifier);
-    if (!frame)
-        return completionHandler("Test Error - frame missing in UI process"_s);
-
-    auto sendResult = frame->process().sendSync(Messages::WebProcess::RenderTreeAsText(frameIdentifier, baseIndent, behavior), 0);
-    if (!sendResult.succeeded())
-        return completionHandler("Test Error - sending WebProcess::RenderTreeAsText failed"_s);
-
-    auto [result] = sendResult.takeReply();
-    completionHandler(WTFMove(result));
+    auto authorizationTokenMapByPageIterator = m_userInitiatedActionByAuthorizationTokenMap.find(pageID);
+    if (authorizationTokenMapByPageIterator != m_userInitiatedActionByAuthorizationTokenMap.end()) {
+        if (auto removed = m_userInitiatedActionMap.take(identifier); removed && removed->authorizationToken()) {
+            authorizationTokenMapByPageIterator->value.remove(*removed->authorizationToken());
+            if (authorizationTokenMapByPageIterator->value.isEmpty())
+                m_userInitiatedActionByAuthorizationTokenMap.remove(authorizationTokenMapByPageIterator);
+        }
+    }
 }
 
 bool WebProcessProxy::canBeAddedToWebProcessCache() const
@@ -1665,20 +1625,20 @@ RefPtr<API::Object> WebProcessProxy::transformHandlesToObjects(API::Object* obje
 
             case API::Object::Type::PageHandle:
                 ASSERT(static_cast<API::PageHandle&>(object).isAutoconverting());
-                return checkedProcess()->webPage(static_cast<API::PageHandle&>(object).pageProxyID());
+                return protectedProcess()->webPage(static_cast<API::PageHandle&>(object).pageProxyID());
 
 #if PLATFORM(COCOA)
             case API::Object::Type::ObjCObjectGraph:
-                return checkedProcess()->transformHandlesToObjects(static_cast<ObjCObjectGraph&>(object));
+                return protectedProcess()->transformHandlesToObjects(static_cast<ObjCObjectGraph&>(object));
 #endif
             default:
                 return &object;
             }
         }
 
-        CheckedRef<WebProcessProxy> checkedProcess() const { return m_webProcessProxy; }
+        Ref<WebProcessProxy> protectedProcess() const { return m_webProcessProxy.get(); }
 
-        CheckedRef<WebProcessProxy> m_webProcessProxy;
+        WeakRef<WebProcessProxy> m_webProcessProxy;
     };
 
     return UserData::transform(object, Transformer(*this));
@@ -1800,16 +1760,25 @@ void WebProcessProxy::didDropLastAssertion()
 
 void WebProcessProxy::prepareToDropLastAssertion(CompletionHandler<void()>&& completionHandler)
 {
-#if PLATFORM(MAC)
-    if (isInProcessCache()) {
-        // We don't free caches in cached WebProcesses on macOS for performance reasons.
-        // Cached WebProcess will anyway shutdown on memory pressure.
+#if ENABLE(WEBPROCESS_CACHE)
+    if (isInProcessCache() || !m_suspendedPages.isEmptyIgnoringNullReferences() || (canTerminateAuxiliaryProcess() && canBeAddedToWebProcessCache())) {
+        // We avoid freeing caches if:
+        //
+        //  1. The process is already in the WebProcess cache.
+        //  2. The process is already in the back/forward cache.
+        //  3. The process might end up in the process cache (canTerminateAuxiliaryProcess() && canBeAddedToWebProcessCache())
+        //
+        // The idea here is that we want these cached processes to retain useful data if they're
+        // reused. They have a low jetsam priority and will be killed by our low memory handler or
+        // the kernel if necessary.
         return completionHandler();
     }
-#endif
-    // We don't slim down the process in the PrepareToSuspend IPC, we delay clearing the
-    // caches until we release the suspended assertion.
+    // When the WebProcess cache is enabled, instead of freeing caches in the PrepareToSuspend
+    // we free caches here just before we drop our last process assertion.
     sendWithAsyncReply(Messages::WebProcess::ReleaseMemory(), WTFMove(completionHandler), 0, { }, ShouldStartProcessThrottlerActivity::No);
+#else
+    completionHandler();
+#endif
 }
 
 String WebProcessProxy::environmentIdentifier() const
@@ -2000,13 +1969,6 @@ void WebProcessProxy::didExceedCPULimit()
 void WebProcessProxy::updateBackgroundResponsivenessTimer()
 {
     m_backgroundResponsivenessTimer.updateState();
-}
-
-void WebProcessProxy::updateBlobRegistryPartitioningState() const
-{
-    RefPtr dataStore = websiteDataStore();
-    if (RefPtr networkProcess = dataStore ? dataStore->networkProcessIfExists() : nullptr)
-        networkProcess->setBlobRegistryTopOriginPartitioningEnabled(sessionID(),  dataStore->isBlobRegistryPartitioningEnabled());
 }
 
 #if !PLATFORM(COCOA)
@@ -2271,20 +2233,16 @@ void WebProcessProxy::establishRemoteWorkerContext(RemoteWorkerType workerType, 
 
 void WebProcessProxy::setRemoteWorkerUserAgent(const String& userAgent)
 {
-#if ENABLE(SERVICE_WORKER)
     if (m_serviceWorkerInformation)
         send(Messages::WebSWContextManagerConnection::SetUserAgent { userAgent }, 0);
-#endif
     if (m_sharedWorkerInformation)
         send(Messages::WebSharedWorkerContextManagerConnection::SetUserAgent { userAgent }, 0);
 }
 
 void WebProcessProxy::updateRemoteWorkerPreferencesStore(const WebPreferencesStore& store)
 {
-#if ENABLE(SERVICE_WORKER)
     if (m_serviceWorkerInformation)
         send(Messages::WebSWContextManagerConnection::UpdatePreferencesStore { store }, 0);
-#endif
     if (m_sharedWorkerInformation)
         send(Messages::WebSharedWorkerContextManagerConnection::UpdatePreferencesStore { store }, 0);
 }
@@ -2348,8 +2306,6 @@ void WebProcessProxy::unregisterRemoteWorkerClientProcess(RemoteWorkerType worke
     updateRemoteWorkerProcessAssertion(workerType);
 }
 
-#if ENABLE(SERVICE_WORKER)
-
 bool WebProcessProxy::hasServiceWorkerForegroundActivityForTesting() const
 {
     return m_serviceWorkerInformation ? ProcessThrottler::isValidForegroundActivity(m_serviceWorkerInformation->activity) : false;
@@ -2379,7 +2335,6 @@ void WebProcessProxy::endServiceWorkerBackgroundProcessing()
     m_hasServiceWorkerBackgroundProcessing = false;
     updateRemoteWorkerProcessAssertion(RemoteWorkerType::ServiceWorker);
 }
-#endif // ENABLE(SERVICE_WORKER)
 
 void WebProcessProxy::disableRemoteWorkers(OptionSet<RemoteWorkerType> workerTypes)
 {
@@ -2391,14 +2346,12 @@ void WebProcessProxy::disableRemoteWorkers(OptionSet<RemoteWorkerType> workerTyp
         didDisableWorkers = true;
     }
 
-#if ENABLE(SERVICE_WORKER)
     if (workerTypes.contains(RemoteWorkerType::ServiceWorker) && m_serviceWorkerInformation) {
         WEBPROCESSPROXY_RELEASE_LOG(Process, "disableWorkers: Disabling service workers");
         removeMessageReceiver(Messages::NotificationManagerMessageHandler::messageReceiverName(), m_serviceWorkerInformation->remoteWorkerPageID);
         m_serviceWorkerInformation = { };
         didDisableWorkers = true;
     }
-#endif
 
     if (!didDisableWorkers)
         return;
@@ -2411,10 +2364,8 @@ void WebProcessProxy::disableRemoteWorkers(OptionSet<RemoteWorkerType> workerTyp
     if (workerTypes.contains(RemoteWorkerType::SharedWorker))
         send(Messages::WebSharedWorkerContextManagerConnection::Close { }, 0);
 
-#if ENABLE(SERVICE_WORKER)
     if (workerTypes.contains(RemoteWorkerType::ServiceWorker))
         send(Messages::WebSWContextManagerConnection::Close { }, 0);
-#endif
 
     maybeShutDown();
 }
@@ -2456,10 +2407,8 @@ void WebProcessProxy::enableRemoteWorkers(RemoteWorkerType workerType, const Use
 
     protectedProcessPool()->addRemoteWorkerProcess(*this);
 
-#if ENABLE(SERVICE_WORKER)
     if (workerType == RemoteWorkerType::ServiceWorker)
         addMessageReceiver(Messages::NotificationManagerMessageHandler::messageReceiverName(), m_serviceWorkerInformation->remoteWorkerPageID, ServiceWorkerNotificationHandler::singleton());
-#endif
 
     updateBackgroundResponsivenessTimer();
 

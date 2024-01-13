@@ -129,9 +129,9 @@ class MediaPlayerFactoryMediaFoundation final : public MediaPlayerFactory {
 private:
     MediaPlayerEnums::MediaEngineIdentifier identifier() const final { return MediaPlayerEnums::MediaEngineIdentifier::MediaFoundation; };
 
-    std::unique_ptr<MediaPlayerPrivateInterface> createMediaEnginePlayer(MediaPlayer* player) const final
+    Ref<MediaPlayerPrivateInterface> createMediaEnginePlayer(MediaPlayer* player) const final
     {
-        return makeUnique<MediaPlayerPrivateMediaFoundation>(player);
+        return adoptRef(*new MediaPlayerPrivateMediaFoundation(player));
     }
 
     void getSupportedTypes(HashSet<String>& types) const final
@@ -2837,7 +2837,7 @@ void MediaPlayerPrivateMediaFoundation::Direct3DPresenter::paintCurrentFrame(Web
             auto surface = adoptRef(cairo_image_surface_create_for_data(static_cast<unsigned char*>(data), cairoFormat, width, height, pitch));
             auto image = NativeImage::create(WTFMove(surface));
             FloatRect srcRect(0, 0, width, height);
-            context.drawNativeImage(*image, srcRect.size(), destRect, srcRect);
+            context.drawNativeImage(*image, destRect, srcRect);
         }
         m_memSurface->UnlockRect();
     }

@@ -37,6 +37,7 @@
 #include "SpeechSynthesisUtterance.h"
 #include "TextTrackCue.h"
 #include "VTTRegion.h"
+#include <wtf/LoggerHelper.h>
 #include <wtf/TypeCasts.h>
 
 namespace WebCore {
@@ -96,23 +97,23 @@ public:
     void applyCSSProperties() override;
     void applyCSSPropertiesWithRegion();
 
-    void setFontSizeFromCaptionUserPrefs(int fontSize) { m_fontSizeFromCaptionUserPrefs = fontSize; }
-
 protected:
     VTTCueBox(Document&, VTTCue&);
 
     RenderPtr<RenderElement> createElementRenderer(RenderStyle&&, const RenderTreePosition&) final;
 
-    int fontSizeFromCaptionUserPrefs() const { return m_fontSizeFromCaptionUserPrefs; }
-
 private:
     WeakPtr<VTTCue> m_cue;
-    int m_fontSizeFromCaptionUserPrefs;
 };
 
 // ----------------------------
 
-class VTTCue : public TextTrackCue {
+class VTTCue
+    : public TextTrackCue
+#if !RELEASE_LOG_DISABLED
+    , private LoggerHelper
+#endif
+{
     WTF_MAKE_ISO_ALLOCATED(VTTCue);
 public:
     static Ref<VTTCue> create(Document&, double start, double end, String&& content);
@@ -257,6 +258,13 @@ private:
     void pauseSpeaking() final;
     void cancelSpeaking() final;
 
+#if !RELEASE_LOG_DISABLED
+    const Logger& logger() const final { return *m_logger; }
+    const void* logIdentifier() const final;
+    WTFLogChannel& logChannel() const final;
+    const char* logClassName() const final { return "VTTCue"; }
+#endif
+
     String m_content;
     String m_settings;
     std::optional<double> m_linePosition;
@@ -299,6 +307,11 @@ private:
     LineAndPositionSetting m_top { Auto };
     LineAndPositionSetting m_width { Auto };
     LineAndPositionSetting m_height { Auto };
+
+#if !RELEASE_LOG_DISABLED
+    mutable RefPtr<Logger> m_logger;
+    mutable const void* m_logIdentifier { nullptr };
+#endif
 };
 
 } // namespace WebCore

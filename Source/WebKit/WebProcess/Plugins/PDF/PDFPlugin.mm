@@ -54,9 +54,6 @@
 #import "WebPasteboardProxyMessages.h"
 #import "WebProcess.h"
 #import "WebWheelEvent.h"
-#import <JavaScriptCore/JSContextRef.h>
-#import <JavaScriptCore/JSObjectRef.h>
-#import <JavaScriptCore/OpaqueJSString.h>
 #import <Quartz/Quartz.h>
 #import <QuartzCore/QuartzCore.h>
 #import <WebCore/AXObjectCache.h>
@@ -190,13 +187,16 @@ static const uint32_t nonLinearizedPDFSentinel = std::numeric_limits<uint32_t>::
 
 - (NSObject *)parent
 {
-    if (!_parent) {
-        if (auto* axObjectCache = _pdfPlugin->axObjectCache()) {
-            if (RefPtr pluginAxObject = axObjectCache->getOrCreate(_pluginElement.get()))
-                _parent = pluginAxObject->wrapper();
-        }
+    RetainPtr<WKPDFPluginAccessibilityObject> protectedSelf = retainPtr(self);
+    if (!protectedSelf->_parent) {
+        callOnMainRunLoopAndWait([&protectedSelf] {
+            if (auto* axObjectCache = protectedSelf->_pdfPlugin->axObjectCache()) {
+                if (RefPtr pluginAxObject = axObjectCache->getOrCreate(protectedSelf->_pluginElement.get()))
+                    protectedSelf->_parent = pluginAxObject->wrapper();
+            }
+        });
     }
-    return _parent.get().get();
+    return protectedSelf->_parent.get().get();
 }
 
 - (void)setParent:(NSObject *)parent
@@ -550,99 +550,6 @@ static WebCore::Cursor::Type toWebCoreCursorType(PDFLayerControllerCursorType cu
 namespace WebKit {
 using namespace WebCore;
 using namespace HTMLNames;
-
-static void appendValuesInPDFNameSubtreeToVector(CGPDFDictionaryRef subtree, Vector<CGPDFObjectRef>& values)
-{
-    CGPDFArrayRef names;
-    if (CGPDFDictionaryGetArray(subtree, "Names", &names)) {
-        size_t nameCount = CGPDFArrayGetCount(names) / 2;
-        for (size_t i = 0; i < nameCount; ++i) {
-            CGPDFObjectRef object;
-            CGPDFArrayGetObject(names, 2 * i + 1, &object);
-            values.append(object);
-        }
-        return;
-    }
-
-    CGPDFArrayRef kids;
-    if (!CGPDFDictionaryGetArray(subtree, "Kids", &kids))
-        return;
-
-    size_t kidCount = CGPDFArrayGetCount(kids);
-    for (size_t i = 0; i < kidCount; ++i) {
-        CGPDFDictionaryRef kid;
-        if (!CGPDFArrayGetDictionary(kids, i, &kid))
-            continue;
-        appendValuesInPDFNameSubtreeToVector(kid, values);
-    }
-}
-
-static void getAllValuesInPDFNameTree(CGPDFDictionaryRef tree, Vector<CGPDFObjectRef>& allValues)
-{
-    appendValuesInPDFNameSubtreeToVector(tree, allValues);
-}
-
-static void getAllScriptsInPDFDocument(CGPDFDocumentRef pdfDocument, Vector<RetainPtr<CFStringRef>>& scripts)
-{
-    if (!pdfDocument)
-        return;
-
-    CGPDFDictionaryRef pdfCatalog = CGPDFDocumentGetCatalog(pdfDocument);
-    if (!pdfCatalog)
-        return;
-
-    // Get the dictionary of all document-level name trees.
-    CGPDFDictionaryRef namesDictionary;
-    if (!CGPDFDictionaryGetDictionary(pdfCatalog, "Names", &namesDictionary))
-        return;
-
-    // Get the document-level "JavaScript" name tree.
-    CGPDFDictionaryRef javaScriptNameTree;
-    if (!CGPDFDictionaryGetDictionary(namesDictionary, "JavaScript", &javaScriptNameTree))
-        return;
-
-    // The names are arbitrary. We are only interested in the values.
-    Vector<CGPDFObjectRef> objects;
-    getAllValuesInPDFNameTree(javaScriptNameTree, objects);
-    size_t objectCount = objects.size();
-
-    for (size_t i = 0; i < objectCount; ++i) {
-        CGPDFDictionaryRef javaScriptAction;
-        if (!CGPDFObjectGetValue(reinterpret_cast<CGPDFObjectRef>(objects[i]), kCGPDFObjectTypeDictionary, &javaScriptAction))
-            continue;
-
-        // A JavaScript action must have an action type of "JavaScript".
-        const char* actionType;
-        if (!CGPDFDictionaryGetName(javaScriptAction, "S", &actionType) || strcmp(actionType, "JavaScript"))
-            continue;
-
-        const UInt8* bytes = nullptr;
-        CFIndex length = 0;
-        CGPDFStreamRef stream;
-        CGPDFStringRef string;
-        RetainPtr<CFDataRef> data;
-        if (CGPDFDictionaryGetStream(javaScriptAction, "JS", &stream)) {
-            CGPDFDataFormat format;
-            data = adoptCF(CGPDFStreamCopyData(stream, &format));
-            if (!data)
-                continue;
-            bytes = CFDataGetBytePtr(data.get());
-            length = CFDataGetLength(data.get());
-        } else if (CGPDFDictionaryGetString(javaScriptAction, "JS", &string)) {
-            bytes = CGPDFStringGetBytePtr(string);
-            length = CGPDFStringGetLength(string);
-        }
-        if (!bytes || !length)
-            continue;
-
-        CFStringEncoding encoding = (length > 1 && bytes[0] == 0xFE && bytes[1] == 0xFF) ? kCFStringEncodingUnicode : kCFStringEncodingUTF8;
-        RetainPtr<CFStringRef> script = adoptCF(CFStringCreateWithBytes(kCFAllocatorDefault, bytes, length, encoding, true));
-        if (!script)
-            continue;
-        
-        scripts.append(script);
-    }
-}
 
 bool PDFPlugin::pdfKitLayerControllerIsAvailable()
 {
@@ -1337,71 +1244,9 @@ void PDFPlugin::destroyScrollbar(ScrollbarOrientation orientation)
     }
 }
 
-static void jsPDFDocInitialize(JSContextRef ctx, JSObjectRef object)
-{
-    PDFPlugin* pdfView = static_cast<PDFPlugin*>(JSObjectGetPrivate(object));
-    pdfView->ref();
-}
-
-static void jsPDFDocFinalize(JSObjectRef object)
-{
-    PDFPlugin* pdfView = static_cast<PDFPlugin*>(JSObjectGetPrivate(object));
-    pdfView->deref();
-}
-
-JSClassRef PDFPlugin::jsPDFDocClass()
-{
-    static const JSStaticFunction jsPDFDocStaticFunctions[] = {
-        { "print", jsPDFDocPrint, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete },
-        { 0, 0, 0 },
-    };
-
-    static const JSClassDefinition jsPDFDocClassDefinition = {
-        0,
-        kJSClassAttributeNone,
-        "Doc",
-        0,
-        0,
-        jsPDFDocStaticFunctions,
-        jsPDFDocInitialize, jsPDFDocFinalize, 0, 0, 0, 0, 0, 0, 0, 0, 0
-    };
-
-    static JSClassRef jsPDFDocClass = JSClassCreate(&jsPDFDocClassDefinition);
-    return jsPDFDocClass;
-}
-
-JSValueRef PDFPlugin::jsPDFDocPrint(JSContextRef ctx, JSObjectRef function, JSObjectRef thisObject, size_t argumentCount, const JSValueRef arguments[], JSValueRef* exception)
-{
-    if (!JSValueIsObjectOfClass(ctx, thisObject, jsPDFDocClass()))
-        return JSValueMakeUndefined(ctx);
-
-    RefPtr pdfPlugin = static_cast<PDFPlugin*>(JSObjectGetPrivate(thisObject));
-
-    RefPtr frame = pdfPlugin->m_frame.get();
-    if (!frame)
-        return JSValueMakeUndefined(ctx);
-
-    RefPtr coreFrame = frame->coreLocalFrame();
-    if (!coreFrame)
-        return JSValueMakeUndefined(ctx);
-
-    CheckedPtr page = coreFrame->page();
-    if (!page)
-        return JSValueMakeUndefined(ctx);
-
-    page->chrome().print(*coreFrame);
-
-    return JSValueMakeUndefined(ctx);
-}
-
 FloatSize PDFPlugin::pdfDocumentSizeForPrinting() const
 {
     return FloatSize([[m_pdfDocument pageAtIndex:0] boundsForBox:kPDFDisplayBoxCropBox].size);
-}
-
-JSObjectRef PDFPlugin::makeJSPDFDoc(JSContextRef ctx)
-{
-    return JSObjectMake(ctx, jsPDFDocClass(), this);
 }
 
 void PDFPlugin::installPDFDocument()
@@ -1430,7 +1275,7 @@ void PDFPlugin::installPDFDocument()
     m_pdfLayerController.get().document = m_pdfDocument.get();
 
     if (handlesPageScaleFactor())
-        m_view->setPageScaleFactor([m_pdfLayerController contentScaleFactor]);
+        m_view->setPageScaleFactor([m_pdfLayerController contentScaleFactor], std::nullopt);
 
     notifyScrollPositionChanged(IntPoint([m_pdfLayerController scrollPosition]));
 
@@ -1493,45 +1338,6 @@ void PDFPlugin::incrementalPDFStreamDidFail()
 #endif
 }
 
-void PDFPlugin::tryRunScriptsInPDFDocument()
-{
-    ASSERT(isMainRunLoop());
-
-    if (!m_pdfDocument || !m_documentFinishedLoading)
-        return;
-
-    auto completionHandler = [this, protectedThis = Ref { *this }] (Vector<RetainPtr<CFStringRef>>&& scripts) mutable {
-        if (scripts.isEmpty())
-            return;
-
-        JSGlobalContextRef ctx = JSGlobalContextCreate(nullptr);
-        JSObjectRef jsPDFDoc = makeJSPDFDoc(ctx);
-        for (auto& script : scripts)
-            JSEvaluateScript(ctx, OpaqueJSString::tryCreate(script.get()).get(), jsPDFDoc, nullptr, 1, nullptr);
-        JSGlobalContextRelease(ctx);
-    };
-
-#if HAVE(INCREMENTAL_PDF_APIS)
-    auto scriptUtilityQueue = WorkQueue::create("PDF script utility");
-    auto& rawQueue = scriptUtilityQueue.get();
-    RetainPtr<CGPDFDocumentRef> document = [m_pdfDocument documentRef];
-    rawQueue.dispatch([scriptUtilityQueue = WTFMove(scriptUtilityQueue), completionHandler = WTFMove(completionHandler), document = WTFMove(document)] () mutable {
-        ASSERT(!isMainRunLoop());
-
-        Vector<RetainPtr<CFStringRef>> scripts;
-        getAllScriptsInPDFDocument(document.get(), scripts);
-
-        callOnMainRunLoop([completionHandler = WTFMove(completionHandler), scripts = WTFMove(scripts)] () mutable {
-            completionHandler(WTFMove(scripts));
-        });
-    });
-#else
-    Vector<RetainPtr<CFStringRef>> scripts;
-    getAllScriptsInPDFDocument([m_pdfDocument documentRef], scripts);
-    completionHandler(WTFMove(scripts));
-#endif
-}
-
 void PDFPlugin::createPasswordEntryForm()
 {
     if (!supportsForms())
@@ -1569,7 +1375,7 @@ void PDFPlugin::updatePageAndDeviceScaleFactors()
         [m_pdfLayerController setDeviceScaleFactor:newScaleFactor];
 }
 
-void PDFPlugin::contentsScaleFactorChanged(float)
+void PDFPlugin::deviceScaleFactorChanged(float)
 {
     updatePageAndDeviceScaleFactors();
 }
@@ -1625,7 +1431,7 @@ void PDFPlugin::teardown()
 void PDFPlugin::paintControlForLayerInContext(CALayer *layer, CGContextRef context)
 {
 #if PLATFORM(MAC)
-    CheckedPtr page = this->page();
+    RefPtr page = this->page();
     if (!page)
         return;
     LocalDefaultSystemAppearance localAppearance(page->useDarkAppearance());
@@ -1685,7 +1491,7 @@ PlatformLayer* PDFPlugin::platformLayer() const
 
 void PDFPlugin::geometryDidChange(const IntSize& pluginSize, const AffineTransform& pluginToRootViewTransform)
 {
-    if (size() == pluginSize && m_view->pageScaleFactor() == [m_pdfLayerController contentScaleFactor])
+    if (size() == pluginSize)
         return;
 
     LOG_WITH_STREAM(Plugins, stream << "PDFPlugin::geometryDidChange - size " << pluginSize << " pluginToRootViewTransform " << pluginToRootViewTransform);
@@ -1698,18 +1504,6 @@ void PDFPlugin::geometryDidChange(const IntSize& pluginSize, const AffineTransfo
     CATransform3D transform = CATransform3DMakeScale(1, -1, 1);
     transform = CATransform3DTranslate(transform, 0, -pluginSize.height(), 0);
     
-    if (handlesPageScaleFactor()) {
-        CGFloat magnification = m_view->pageScaleFactor() - [m_pdfLayerController contentScaleFactor];
-
-        // FIXME: Instead of m_lastMousePositionInPluginCoordinates, we should use the zoom origin from PluginView::setPageScaleFactor.
-        if (magnification)
-            [m_pdfLayerController magnifyWithMagnification:magnification atPoint:convertFromPluginToPDFView(m_lastMousePositionInPluginCoordinates) immediately:NO];
-    } else {
-        // If we don't handle page scale ourselves, we need to respect our parent page's
-        // scale, which may have changed.
-        updatePageAndDeviceScaleFactors();
-    } 
-
     updatePDFHUDLocation();
     updateScrollbars();
 
@@ -1718,6 +1512,59 @@ void PDFPlugin::geometryDidChange(const IntSize& pluginSize, const AffineTransfo
 
     [m_contentLayer setSublayerTransform:transform];
     [CATransaction commit];
+}
+
+IntPoint PDFPlugin::convertFromPluginToPDFView(const IntPoint& point) const
+{
+    return IntPoint(point.x(), size().height() - point.y());
+}
+
+IntPoint PDFPlugin::convertFromPDFViewToRootView(const IntPoint& point) const
+{
+    IntPoint pointInPluginCoordinates(point.x(), size().height() - point.y());
+    return valueOrDefault(m_rootViewToPluginTransform.inverse()).mapPoint(pointInPluginCoordinates);
+}
+
+IntRect PDFPlugin::convertFromPDFViewToRootView(const IntRect& rect) const
+{
+    IntRect rectInPluginCoordinates(rect.x(), rect.y(), rect.width(), rect.height());
+    return valueOrDefault(m_rootViewToPluginTransform.inverse()).mapRect(rectInPluginCoordinates);
+}
+
+IntPoint PDFPlugin::convertFromRootViewToPDFView(const IntPoint& point) const
+{
+    IntPoint pointInPluginCoordinates = m_rootViewToPluginTransform.mapPoint(point);
+    return IntPoint(pointInPluginCoordinates.x(), size().height() - pointInPluginCoordinates.y());
+}
+
+FloatRect PDFPlugin::convertFromPDFViewToScreen(const FloatRect& rect) const
+{
+    return WebCore::Accessibility::retrieveValueFromMainThread<WebCore::FloatRect>([&] () -> WebCore::FloatRect {
+        FloatRect updatedRect = rect;
+        updatedRect.setLocation(convertFromPDFViewToRootView(IntPoint(updatedRect.location())));
+        RefPtr page = this->page();
+        if (!page)
+            return { };
+        return page->chrome().rootViewToScreen(enclosingIntRect(updatedRect));
+    });
+}
+
+void PDFPlugin::setPageScaleFactor(double scale, std::optional<WebCore::IntPoint> origin)
+{
+    if (!handlesPageScaleFactor()) {
+        // If we don't handle page scale ourselves, we need to respect our parent page's scale.
+        updatePageAndDeviceScaleFactors();
+        return;
+    }
+
+    if (scale == [m_pdfLayerController contentScaleFactor])
+        return;
+
+    if (!origin)
+        origin = IntRect({ }, size()).center();
+
+    if (CGFloat magnification = scale - [m_pdfLayerController contentScaleFactor])
+        [m_pdfLayerController magnifyWithMagnification:magnification atPoint:convertFromPluginToPDFView(*origin) immediately:NO];
 }
 
 static NSUInteger modifierFlagsFromWebEvent(const WebEvent& event)
@@ -1952,7 +1799,11 @@ bool PDFPlugin::handleContextMenuEvent(const WebMouseEvent& event)
             continue;
         if ([NSStringFromSelector(item.action) isEqualToString:@"openWithPreview"])
             openInPreviewIndex = i;
-        PDFContextMenuItem menuItem { String([item title]), !![item isEnabled], !![item isSeparatorItem], static_cast<int>([item state]), !![item action], i };
+        PDFContextMenuItem menuItem { String([item title]), static_cast<int>([item state]), i,
+            [item isEnabled] ? ContextMenuItemEnablement::Enabled : ContextMenuItemEnablement::Disabled,
+            [item action] ? ContextMenuItemHasAction::Yes : ContextMenuItemHasAction::No,
+            [item isSeparatorItem] ? ContextMenuItemIsSeparator::Yes : ContextMenuItemIsSeparator::No
+        };
         items.append(WTFMove(menuItem));
     }
     PDFContextMenu contextMenu { point, WTFMove(items), WTFMove(openInPreviewIndex) };
@@ -1983,7 +1834,7 @@ bool PDFPlugin::handleKeyboardEvent(const WebKeyboardEvent& event)
     return false;
 }
     
-bool PDFPlugin::handleEditingCommand(StringView commandName)
+bool PDFPlugin::handleEditingCommand(const String& commandName, const String&)
 {
     if (commandName == "copy"_s)
         [m_pdfLayerController copySelection];
@@ -1998,7 +1849,7 @@ bool PDFPlugin::handleEditingCommand(StringView commandName)
     return true;
 }
 
-bool PDFPlugin::isEditingCommandEnabled(StringView commandName)
+bool PDFPlugin::isEditingCommandEnabled(const String& commandName)
 {
     if (commandName == "copy"_s || commandName == "takeFindStringFromSelection"_s)
         return [m_pdfLayerController currentSelection];
@@ -2031,11 +1882,6 @@ void PDFPlugin::invalidateScrollbarRect(Scrollbar& scrollbar, const IntRect& rec
 void PDFPlugin::invalidateScrollCornerRect(const IntRect& rect)
 {
     [m_scrollCornerLayer setNeedsDisplay];
-}
-
-bool PDFPlugin::handlesPageScaleFactor() const
-{
-    return m_frame && m_frame->isMainFrame() && isFullFramePlugin();
 }
 
 void PDFPlugin::clickedLink(NSURL *url)
@@ -2087,7 +1933,7 @@ bool PDFPlugin::supportsForms()
 void PDFPlugin::notifyContentScaleFactorChanged(CGFloat scaleFactor)
 {
     if (handlesPageScaleFactor())
-        m_view->setPageScaleFactor(scaleFactor);
+        m_view->setPageScaleFactor(scaleFactor, std::nullopt);
 
     updatePDFHUDLocation();
     updateScrollbars();

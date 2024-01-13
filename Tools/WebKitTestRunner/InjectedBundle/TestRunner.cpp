@@ -40,7 +40,6 @@
 #include <WebKit/WKBundleBackForwardList.h>
 #include <WebKit/WKBundleFrame.h>
 #include <WebKit/WKBundleFramePrivate.h>
-#include <WebKit/WKBundleInspector.h>
 #include <WebKit/WKBundleNodeHandlePrivate.h>
 #include <WebKit/WKBundlePage.h>
 #include <WebKit/WKBundlePagePrivate.h>
@@ -541,17 +540,17 @@ void TestRunner::makeWindowObject(JSContextRef context)
 
 void TestRunner::showWebInspector()
 {
-    WKBundleInspectorShow(WKBundlePageGetInspector(page()));
+    WKBundlePageShowInspectorForTest(page());
 }
 
 void TestRunner::closeWebInspector()
 {
-    WKBundleInspectorClose(WKBundlePageGetInspector(page()));
+    WKBundlePageCloseInspectorForTest(page());
 }
 
 void TestRunner::evaluateInWebInspector(JSStringRef script)
 {
-    WKBundleInspectorEvaluateScriptForTest(WKBundlePageGetInspector(page()), toWK(script).get());
+    WKBundlePageEvaluateScriptInInspectorForTest(page(), toWK(script).get());
 }
 
 using WorldMap = WTF::HashMap<unsigned, WKRetainPtr<WKBundleScriptWorldRef>>;
@@ -684,6 +683,7 @@ enum {
     AppBoundRequestContextDataForDomainCallbackID,
     TakeViewPortSnapshotCallbackID,
     RemoveAllCookiesCallbackID,
+    GetAndClearReportedWindowProxyAccessDomainsCallbackID,
     FirstUIScriptCallbackID = 100
 };
 
@@ -2423,6 +2423,18 @@ void TestRunner::viewPortSnapshotTaken(WKStringRef value)
 void TestRunner::generateTestReport(JSStringRef message, JSStringRef group)
 {
     _WKBundleFrameGenerateTestReport(mainFrame(), toWK(message).get(), toWK(group).get());
+}
+
+void TestRunner::getAndClearReportedWindowProxyAccessDomains(JSValueRef callback)
+{
+    cacheTestRunnerCallback(GetAndClearReportedWindowProxyAccessDomainsCallbackID, callback);
+    postMessage("GetAndClearReportedWindowProxyAccessDomains");
+}
+
+void TestRunner::didGetAndClearReportedWindowProxyAccessDomains(WKArrayRef value)
+{
+    auto jsValue = stringArrayToJS(mainFrameJSContext(), value);
+    callTestRunnerCallback(GetAndClearReportedWindowProxyAccessDomainsCallbackID, 1, &jsValue);
 }
 
 ALLOW_DEPRECATED_DECLARATIONS_END

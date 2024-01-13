@@ -44,6 +44,8 @@ class SlotAssignment;
 class StyleSheetList;
 class WebAnimation;
 
+enum class ParserContentPolicy : uint8_t;
+
 class ShadowRoot final : public DocumentFragment, public TreeScope {
     WTF_MAKE_ISO_ALLOCATED(ShadowRoot);
 public:
@@ -95,7 +97,9 @@ public:
 
     Element* host() const { return m_host.get(); }
     RefPtr<Element> protectedHost() const { return m_host.get(); }
-    void setHost(CheckedPtr<Element>&& host) { m_host = WTFMove(host); }
+    void setHost(WeakPtr<Element, WeakPtrImplWithEventTargetData>&& host) { m_host = WTFMove(host); }
+
+    ExceptionOr<void> setHTMLUnsafe(const String&);
 
     String innerHTML() const;
     ExceptionOr<void> setInnerHTML(const String&);
@@ -153,6 +157,8 @@ private:
 
     void childrenChanged(const ChildChange&) override;
 
+    ExceptionOr<void> replaceChildrenWithMarkup(const String&, OptionSet<ParserContentPolicy>);
+
     bool m_hasBegunDeletingDetachedChildren : 1 { false };
     bool m_delegatesFocus : 1 { false };
     bool m_isCloneable : 1 { false };
@@ -162,7 +168,7 @@ private:
     ShadowRootMode m_mode { ShadowRootMode::UserAgent };
     SlotAssignmentMode m_slotAssignmentMode { SlotAssignmentMode::Named };
 
-    CheckedPtr<Element> m_host;
+    WeakPtr<Element, WeakPtrImplWithEventTargetData> m_host;
     RefPtr<StyleSheetList> m_styleSheetList;
 
     std::unique_ptr<Style::Scope> m_styleScope;

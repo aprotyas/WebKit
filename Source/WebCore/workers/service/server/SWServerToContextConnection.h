@@ -25,8 +25,6 @@
 
 #pragma once
 
-#if ENABLE(SERVICE_WORKER)
-
 #include "BackgroundFetchFailureReason.h"
 #include "ExceptionData.h"
 #include "NotificationEventType.h"
@@ -38,6 +36,7 @@
 #include "ServiceWorkerIdentifier.h"
 #include "ServiceWorkerTypes.h"
 #include <wtf/URLHash.h>
+#include <wtf/WeakPtr.h>
 
 namespace WebCore {
 
@@ -50,7 +49,7 @@ struct ServiceWorkerContextData;
 struct ServiceWorkerJobDataIdentifier;
 enum class WorkerThreadMode : bool;
 
-class SWServerToContextConnection {
+class SWServerToContextConnection: public CanMakeWeakPtr<SWServerToContextConnection> {
     WTF_MAKE_FAST_ALLOCATED;
 public:
     WEBCORE_EXPORT virtual ~SWServerToContextConnection();
@@ -115,5 +114,3 @@ private:
 };
 
 } // namespace WebCore
-
-#endif // ENABLE(SERVICE_WORKER)

@@ -29,12 +29,12 @@
 #if ENABLE(THREADED_ANIMATION_RESOLUTION)
 
 #include "AnimationEffect.h"
+#include "BlendingKeyframes.h"
 #include "CSSPropertyAnimation.h"
 #include "CSSPropertyNames.h"
 #include "DeclarativeAnimation.h"
 #include "Document.h"
 #include "KeyframeEffect.h"
-#include "KeyframeList.h"
 #include "LayoutSize.h"
 #include "WebAnimation.h"
 #include "WebAnimationTypes.h"
@@ -118,11 +118,9 @@ static AcceleratedEffectProperty acceleratedPropertyFromCSSProperty(AnimatableCS
         return AcceleratedEffectProperty::OffsetRotate;
     case CSSPropertyFilter:
         return AcceleratedEffectProperty::Filter;
-#if ENABLE(FILTERS_LEVEL_2)
     case CSSPropertyBackdropFilter:
     case CSSPropertyWebkitBackdropFilter:
         return AcceleratedEffectProperty::BackdropFilter;
-#endif
     default:
         ASSERT_NOT_REACHED();
         return AcceleratedEffectProperty::Invalid;
@@ -154,10 +152,8 @@ static CSSPropertyID cssPropertyFromAcceleratedProperty(AcceleratedEffectPropert
         return CSSPropertyOffsetRotate;
     case AcceleratedEffectProperty::Filter:
         return CSSPropertyFilter;
-#if ENABLE(FILTERS_LEVEL_2)
     case AcceleratedEffectProperty::BackdropFilter:
         return CSSPropertyWebkitBackdropFilter;
-#endif
     default:
         ASSERT_NOT_REACHED();
         return CSSPropertyInvalid;

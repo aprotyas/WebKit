@@ -7,12 +7,6 @@ test/built-ins/Array/fromAsync/this-constructor-operations.js:
 test/built-ins/Array/fromAsync/this-constructor.js:
   default: 'Test262:AsyncTestFailure:Test262Error: Test262Error: constructor is called once Expected SameValue(«2», «1») to be true'
   strict mode: 'Test262:AsyncTestFailure:Test262Error: Test262Error: constructor is called once Expected SameValue(«2», «1») to be true'
-test/built-ins/AsyncGeneratorPrototype/return/return-suspendedStart-broken-promise.js:
-  default: 'Error: broken promise'
-  strict mode: 'Error: broken promise'
-test/built-ins/AsyncGeneratorPrototype/return/return-suspendedYield-broken-promise-try-catch.js:
-  default: 'Test262:AsyncTestFailure:Error: broken promise'
-  strict mode: 'Test262:AsyncTestFailure:Error: broken promise'
 test/built-ins/Function/internals/Construct/derived-return-val-realm.js:
   default: 'Test262Error: Expected a TypeError but got a different error constructor with the same name'
   strict mode: 'Test262Error: Expected a TypeError but got a different error constructor with the same name'
@@ -64,9 +58,6 @@ test/built-ins/Proxy/construct/return-not-object-throws-undefined-realm.js:
 test/built-ins/Proxy/construct/trap-is-not-callable-realm.js:
   default: 'Test262Error: Expected a TypeError but got a different error constructor with the same name'
   strict mode: 'Test262Error: Expected a TypeError but got a different error constructor with the same name'
-test/built-ins/RegExp/prototype/Symbol.match/builtin-infer-unicode.js:
-  default: 'Test262Error: Expected SameValue(«�», «null») to be true'
-  strict mode: 'Test262Error: Expected SameValue(«�», «null») to be true'
 test/built-ins/RegExp/prototype/Symbol.match/flags-tostring-error.js:
   default: 'Test262Error: Expected a CustomError but got a Test262Error'
   strict mode: 'Test262Error: Expected a CustomError but got a Test262Error'
@@ -85,15 +76,6 @@ test/built-ins/RegExp/prototype/Symbol.replace/get-flags-err.js:
 test/built-ins/RegExp/prototype/Symbol.replace/get-unicode-error.js:
   default: 'Test262Error: Expected a Test262Error to be thrown but no exception was thrown at all'
   strict mode: 'Test262Error: Expected a Test262Error to be thrown but no exception was thrown at all'
-test/built-ins/RegExp/prototype/Symbol.search/u-lastindex-advance.js:
-  default: 'Test262Error: Expected SameValue(«1», «-1») to be true'
-  strict mode: 'Test262Error: Expected SameValue(«1», «-1») to be true'
-test/built-ins/RegExp/prototype/Symbol.split/u-lastindex-adv-thru-failure.js:
-  default: 'Test262Error: Expected SameValue(«2», «1») to be true'
-  strict mode: 'Test262Error: Expected SameValue(«2», «1») to be true'
-test/built-ins/RegExp/prototype/exec/u-lastindex-adv.js:
-  default: 'Test262Error: Expected SameValue(«�», «null») to be true'
-  strict mode: 'Test262Error: Expected SameValue(«�», «null») to be true'
 test/built-ins/RegExp/quantifier-integer-limit.js:
   default: 'SyntaxError: Invalid regular expression: number too large in {} quantifier'
   strict mode: 'SyntaxError: Invalid regular expression: number too large in {} quantifier'
@@ -340,24 +322,6 @@ test/built-ins/Temporal/Instant/prototype/until/roundingmode-halfTrunc.js:
 test/built-ins/Temporal/Instant/prototype/until/roundingmode-trunc.js:
   default: 'Test262Error: rounds to hours (rounding mode = trunc, negative case) hours result Expected SameValue(«-376436», «-376435») to be true'
   strict mode: 'Test262Error: rounds to hours (rounding mode = trunc, negative case) hours result Expected SameValue(«-376436», «-376435») to be true'
-test/built-ins/Temporal/Now/timeZoneId/extensible.js:
-  default: 'Test262Error: Object.isExtensible(Temporal.Now.timeZoneId) must return true'
-  strict mode: 'Test262Error: Object.isExtensible(Temporal.Now.timeZoneId) must return true'
-test/built-ins/Temporal/Now/timeZoneId/length.js:
-  default: "TypeError: undefined is not an object (evaluating 'Object.getOwnPropertyDescriptor(obj, name)')"
-  strict mode: "TypeError: undefined is not an object (evaluating 'Object.getOwnPropertyDescriptor(obj, name)')"
-test/built-ins/Temporal/Now/timeZoneId/name.js:
-  default: "TypeError: undefined is not an object (evaluating 'Temporal.Now.timeZoneId.name')"
-  strict mode: "TypeError: undefined is not an object (evaluating 'Temporal.Now.timeZoneId.name')"
-test/built-ins/Temporal/Now/timeZoneId/not-a-constructor.js:
-  default: 'Test262Error: isConstructor invoked with a non-function value'
-  strict mode: 'Test262Error: isConstructor invoked with a non-function value'
-test/built-ins/Temporal/Now/timeZoneId/prop-desc.js:
-  default: 'Test262Error: typeof is function Expected SameValue(«undefined», «function») to be true'
-  strict mode: 'Test262Error: typeof is function Expected SameValue(«undefined», «function») to be true'
-test/built-ins/Temporal/Now/timeZoneId/return-value.js:
-  default: "TypeError: Temporal.Now.timeZoneId is not a function. (In 'Temporal.Now.timeZoneId()', 'Temporal.Now.timeZoneId' is undefined)"
-  strict mode: "TypeError: Temporal.Now.timeZoneId is not a function. (In 'Temporal.Now.timeZoneId()', 'Temporal.Now.timeZoneId' is undefined)"
 test/built-ins/Temporal/PlainDate/calendar-case-insensitive.js:
   default: 'Test262Error: Calendar is case-insensitive Expected SameValue(«undefined», «iso8601») to be true'
   strict mode: 'Test262Error: Calendar is case-insensitive Expected SameValue(«undefined», «iso8601») to be true'
@@ -1158,16 +1122,10 @@ test/language/import/import-assertions/json-value-string.js:
   module: "SyntaxError: Unexpected identifier 'assert'. Expected a ';' following a targeted import declaration."
 test/language/import/import-assertions/json-via-namespace.js:
   module: "SyntaxError: Unexpected identifier 'assert'. Expected a ';' following a targeted import declaration."
-test/language/literals/regexp/u-astral-char-class-invert.js:
-  default: 'Test262Error: Expected SameValue(«�», «null») to be true'
-  strict mode: 'Test262Error: Expected SameValue(«�», «null») to be true'
 test/language/module-code/import-assertions/eval-gtbndng-indirect-faux-assertion.js:
   raw: "SyntaxError: Unexpected token '*'. import call expects one or two arguments."
 test/language/module-code/import-assertions/import-assertion-empty.js:
   module: "SyntaxError: Unexpected identifier 'assert'. Expected a ';' following a targeted import declaration."
-test/language/statements/async-generator/return-undefined-implicit-and-explicit.js:
-  default: 'Test262:AsyncTestFailure:Test262Error: Test262Error: Expected [tick 1, g1 ret, tick 2, g2 ret, g3 ret, g4 ret] and [tick 1, g1 ret, g2 ret, tick 2, g3 ret, g4 ret] to have the same contents. Ticks for implicit and explicit return undefined'
-  strict mode: 'Test262:AsyncTestFailure:Test262Error: Test262Error: Expected [tick 1, g1 ret, tick 2, g2 ret, g3 ret, g4 ret] and [tick 1, g1 ret, g2 ret, tick 2, g3 ret, g4 ret] to have the same contents. Ticks for implicit and explicit return undefined'
 test/language/statements/async-generator/yield-star-promise-not-unwrapped.js:
   default: 'Test262:AsyncTestFailure:Test262Error: Test262Error: yield* should not unwrap promises from manually-implemented async iterators Expected SameValue(«unwrapped value», «[object Promise]») to be true'
   strict mode: 'Test262:AsyncTestFailure:Test262Error: Test262Error: yield* should not unwrap promises from manually-implemented async iterators Expected SameValue(«unwrapped value», «[object Promise]») to be true'

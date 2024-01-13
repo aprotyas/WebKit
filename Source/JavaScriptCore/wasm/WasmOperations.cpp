@@ -675,6 +675,7 @@ JSC_DEFINE_JIT_OPERATION(operationIterateResults, void, (Instance* instance, con
 
     unsigned iterationCount = 0;
     MarkedArgumentBuffer buffer;
+    buffer.ensureCapacity(signature->returnCount());
     JSValue result = JSValue::decode(encResult);
     forEachInIterable(globalObject, result, [&] (VM&, JSGlobalObject*, JSValue value) -> void {
         if (buffer.size() < signature->returnCount()) {
@@ -1135,6 +1136,29 @@ JSC_DEFINE_JIT_OPERATION(operationWasmArraySet, void, (Instance* instance, uint3
     return arraySet(instance, typeIndex, arrayValue, index, value);
 }
 
+JSC_DEFINE_JIT_OPERATION(operationWasmArrayFill, UCPUStrictInt32, (Instance* instance, uint32_t typeIndex, EncodedJSValue arrayValue, uint32_t offset, EncodedJSValue value, uint32_t size))
+{
+    CallFrame* callFrame = DECLARE_WASM_CALL_FRAME(instance);
+    VM& vm = instance->vm();
+    NativeCallFrameTracer tracer(vm, callFrame);
+    return toUCPUStrictInt32(arrayFill(instance, typeIndex, arrayValue, offset, value, size));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationWasmArrayCopy, UCPUStrictInt32, (Instance* instance, EncodedJSValue dst, uint32_t dstOffset, EncodedJSValue src, uint32_t srcOffset, uint32_t size))
+{
+    return toUCPUStrictInt32(arrayCopy(instance, dst, dstOffset, src, srcOffset, size));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationWasmArrayInitElem, UCPUStrictInt32, (Instance* instance, EncodedJSValue dst, uint32_t dstOffset, uint32_t srcElementIndex, uint32_t srcOffset, uint32_t size))
+{
+    return toUCPUStrictInt32(arrayInitElem(instance, dst, dstOffset, srcElementIndex, srcOffset, size));
+}
+
+JSC_DEFINE_JIT_OPERATION(operationWasmArrayInitData, UCPUStrictInt32, (Instance* instance, EncodedJSValue dst, uint32_t dstOffset, uint32_t srcDataIndex, uint32_t srcOffset, uint32_t size))
+{
+    return toUCPUStrictInt32(arrayInitData(instance, dst, dstOffset, srcDataIndex, srcOffset, size));
+}
+
 JSC_DEFINE_JIT_OPERATION(operationWasmIsSubRTT, bool, (RTT* maybeSubRTT, RTT* targetRTT))
 {
     ASSERT(maybeSubRTT && targetRTT);
@@ -1146,15 +1170,17 @@ JSC_DEFINE_JIT_OPERATION(operationWasmAnyConvertExtern, EncodedJSValue, (Encoded
     return externInternalize(reference);
 }
 
-JSC_DEFINE_JIT_OPERATION(operationWasmRefTest, int32_t, (Instance* instance, EncodedJSValue reference, uint32_t allowNull, int32_t heapType))
+JSC_DEFINE_JIT_OPERATION(operationWasmRefTest, int32_t, (Instance* instance, EncodedJSValue reference, uint32_t allowNull, int32_t heapType, bool shouldNegate))
 {
     Wasm::TypeIndex typeIndex;
     if (Wasm::typeIndexIsType(static_cast<Wasm::TypeIndex>(heapType)))
         typeIndex = static_cast<Wasm::TypeIndex>(heapType);
     else
         typeIndex = instance->module().moduleInformation().typeSignatures[heapType]->index();
+    int32_t truth = shouldNegate ? 0 : 1;
+    int32_t falsity = shouldNegate ? 1 : 0;
     // Explicitly return 1 or 0 because bool in C++ only reqiures that the bottom bit match the other bits can be anything.
-    return Wasm::refCast(reference, static_cast<bool>(allowNull), typeIndex) ? 1 : 0;
+    return Wasm::refCast(reference, static_cast<bool>(allowNull), typeIndex) ? truth : falsity;
 }
 
 JSC_DEFINE_JIT_OPERATION(operationWasmRefCast, EncodedJSValue, (Instance* instance, EncodedJSValue reference, uint32_t allowNull, int32_t heapType))

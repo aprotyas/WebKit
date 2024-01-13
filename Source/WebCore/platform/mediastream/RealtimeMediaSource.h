@@ -82,7 +82,6 @@ enum class VideoFrameRotation : uint16_t;
 
 struct CaptureSourceError;
 struct CaptureSourceOrError;
-struct PhotoCapabilitiesOrError;
 struct VideoFrameAdaptor;
 
 class WEBCORE_EXPORT RealtimeMediaSource
@@ -129,9 +128,10 @@ public:
 
     virtual ~RealtimeMediaSource();
 
+    // Can be called in worker threads.
     virtual Ref<RealtimeMediaSource> clone() { return *this; }
 
-    const AtomString& hashedId() const;
+    const String& hashedId() const;
     const MediaDeviceHashSalts& deviceIDHashSalts() const;
 
     const String& persistentID() const { return m_device.persistentId(); }
@@ -157,7 +157,7 @@ public:
 
     virtual bool interrupted() const { return false; }
 
-    const AtomString& name() const { return m_name; }
+    const String& name() const { return m_name; }
 
     double fitnessScore() const { return m_fitnessScore; }
 
@@ -215,8 +215,8 @@ public:
     using TakePhotoNativePromise = NativePromise<std::pair<Vector<uint8_t>, String>, String>;
     virtual Ref<TakePhotoNativePromise> takePhoto(PhotoSettings&&);
 
-    using PhotoCapabilitiesHandler = CompletionHandler<void(PhotoCapabilitiesOrError&&)>;
-    virtual void getPhotoCapabilities(PhotoCapabilitiesHandler&&);
+    using PhotoCapabilitiesNativePromise = NativePromise<PhotoCapabilities, String>;
+    virtual Ref<PhotoCapabilitiesNativePromise> getPhotoCapabilities();
 
     using PhotoSettingsNativePromise = NativePromise<PhotoSettings, String>;
     virtual Ref<PhotoSettingsNativePromise> getPhotoSettings();
@@ -224,6 +224,7 @@ public:
     struct ApplyConstraintsError {
         String badConstraint;
         String message;
+        ApplyConstraintsError isolatedCopy() && { return { WTFMove(badConstraint).isolatedCopy(), WTFMove(message).isolatedCopy() }; }
     };
     using ApplyConstraintsHandler = CompletionHandler<void(std::optional<ApplyConstraintsError>&&)>;
     virtual void applyConstraints(const MediaConstraints&, ApplyConstraintsHandler&&);
@@ -242,7 +243,6 @@ public:
     virtual bool isMockSource() const { return false; }
     virtual bool isCaptureSource() const { return false; }
     virtual CaptureDevice::DeviceType deviceType() const { return CaptureDevice::DeviceType::Unknown; }
-    virtual bool isVideoSource() const;
     WEBCORE_EXPORT virtual VideoFrameRotation videoFrameRotation() const;
     WEBCORE_EXPORT virtual IntSize computeResizedVideoFrameSize(IntSize desiredSize, IntSize actualSize);
 
@@ -313,7 +313,7 @@ protected:
 
     void setType(Type);
 
-    void setName(const AtomString&);
+    void setName(const String&);
     void setPersistentId(const String&);
 
     bool hasSeveralVideoFrameObserversWithAdaptors() const { return m_videoFrameObserversWithAdaptors > 1; }
@@ -341,10 +341,10 @@ private:
 
     PageIdentifier m_pageIdentifier;
     MediaDeviceHashSalts m_idHashSalts;
-    AtomString m_hashedID;
-    AtomString m_ephemeralHashedID;
+    String m_hashedID;
+    String m_ephemeralHashedID;
     Type m_type;
-    AtomString m_name;
+    String m_name;
     WeakHashSet<Observer> m_observers;
 
     mutable Lock m_audioSampleObserversLock;
@@ -406,28 +406,9 @@ struct CaptureSourceOrError {
     CaptureSourceError error;
 };
 
-struct PhotoCapabilitiesOrError {
-    PhotoCapabilitiesOrError() = default;
-    PhotoCapabilitiesOrError(std::optional<PhotoCapabilities>&& capabilities, String&& errorMessage)
-        : capabilities(WTFMove(capabilities))
-        , errorMessage(WTFMove(errorMessage))
-    { }
-    PhotoCapabilitiesOrError(PhotoCapabilities& capabilities)
-        : capabilities({ capabilities })
-    { }
-    explicit PhotoCapabilitiesOrError(String&& errorMessage)
-        : errorMessage(WTFMove(errorMessage))
-    { }
-
-    operator bool() const { return capabilities.has_value(); }
-
-    std::optional<PhotoCapabilities> capabilities;
-    String errorMessage;
-};
-
 String convertEnumerationToString(RealtimeMediaSource::Type);
 
-inline void RealtimeMediaSource::setName(const AtomString& name)
+inline void RealtimeMediaSource::setName(const String& name)
 {
     m_name = name;
 }
@@ -435,11 +416,6 @@ inline void RealtimeMediaSource::setName(const AtomString& name)
 inline void RealtimeMediaSource::whenReady(CompletionHandler<void(CaptureSourceError&&)>&& callback)
 {
     callback({ });
-}
-
-inline bool RealtimeMediaSource::isVideoSource() const
-{
-    return false;
 }
 
 inline bool RealtimeMediaSource::isProducingData() const

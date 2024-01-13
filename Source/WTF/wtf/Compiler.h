@@ -68,6 +68,10 @@
 #define WTF_COMPILER_SUPPORTS_CXX_EXCEPTIONS COMPILER_HAS_CLANG_FEATURE(cxx_exceptions)
 #define WTF_COMPILER_SUPPORTS_BUILTIN_IS_TRIVIALLY_COPYABLE COMPILER_HAS_CLANG_FEATURE(is_trivially_copyable)
 
+#if defined(__apple_build_version__)
+#define WTF_COMPILER_APPLE_CLANG 1
+#endif
+
 #ifdef __cplusplus
 #if __cplusplus <= 201103L
 #define WTF_CPP_STD_VER 11
@@ -168,6 +172,16 @@
 #define SUPPRESS_TSAN __attribute__((no_sanitize_thread))
 #else
 #define SUPPRESS_TSAN
+#endif
+
+/* COVERAGE_ENABLED and SUPPRESS_COVERAGE */
+
+#define COVERAGE_ENABLED COMPILER_HAS_CLANG_FEATURE(coverage_sanitizer)
+
+#if COVERAGE_ENABLED
+#define SUPPRESS_COVERAGE __attribute__((no_sanitize("coverage")))
+#else
+#define SUPPRESS_COVERAGE
 #endif
 
 /* ==== Compiler-independent macros for various compiler features, in alphabetical order ==== */

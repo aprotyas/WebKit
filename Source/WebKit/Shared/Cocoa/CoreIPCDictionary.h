@@ -27,6 +27,7 @@
 
 #if PLATFORM(COCOA)
 
+#include "CoreIPCNSCFObject.h"
 #include <wtf/ArgumentCoder.h>
 #include <wtf/KeyValuePair.h>
 #include <wtf/RetainPtr.h>
@@ -34,8 +35,6 @@
 #include <wtf/Vector.h>
 
 namespace WebKit {
-
-class CoreIPCNSCFObject;
 
 class CoreIPCDictionary {
     WTF_MAKE_FAST_ALLOCATED;
@@ -49,6 +48,11 @@ public:
 
     RetainPtr<id> toID() const;
 
+    bool keyHasValueOfType(const String&, IPC::NSType) const;
+    bool keyIsMissingOrHasValueOfType(const String&, IPC::NSType) const;
+    bool collectionValuesAreOfType(const String& key, IPC::NSType) const;
+    bool collectionValuesAreOfType(const String& key, IPC::NSType, IPC::NSType) const;
+
 private:
     friend struct IPC::ArgumentCoder<CoreIPCDictionary, void>;
 
@@ -59,6 +63,9 @@ private:
     {
     }
 
+    void createNSDictionaryIfNeeded() const;
+
+    mutable RetainPtr<NSDictionary> m_nsDictionary;
     ValueType m_keyValuePairs;
 };
 

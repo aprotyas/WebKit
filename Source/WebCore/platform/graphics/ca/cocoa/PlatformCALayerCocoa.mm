@@ -66,8 +66,6 @@
 #import "WAKWindow.h"
 #import "WKGraphics.h"
 #import "WebCoreThread.h"
-#else
-#import "ThemeMac.h"
 #endif
 
 #import <pal/cocoa/AVFoundationSoftLink.h>
@@ -241,16 +239,9 @@ PlatformCALayerCocoa::PlatformCALayerCocoa(LayerType layerType, PlatformCALayerC
     case LayerType::LayerTypeTransformLayer:
         layerClass = [CATransformLayer class];
         break;
-#if ENABLE(FILTERS_LEVEL_2)
     case LayerType::LayerTypeBackdropLayer:
         layerClass = [CABackdropLayer class];
         break;
-#else
-    case LayerType::LayerTypeBackdropLayer:
-        ASSERT_NOT_REACHED();
-        layerClass = [CALayer class];
-        break;
-#endif
     case LayerType::LayerTypeTiledBackingLayer:
     case LayerType::LayerTypePageTiledBackingLayer:
         layerClass = [WebTiledBackingLayer class];
@@ -278,7 +269,7 @@ PlatformCALayerCocoa::PlatformCALayerCocoa(LayerType layerType, PlatformCALayerC
     if (layerClass)
         m_layer = adoptNS([(CALayer *)[layerClass alloc] init]);
 
-#if ENABLE(FILTERS_LEVEL_2) && PLATFORM(MAC)
+#if PLATFORM(MAC)
     if (layerType == LayerType::LayerTypeBackdropLayer)
         [(CABackdropLayer*)m_layer.get() setWindowServerAware:NO];
 #endif
@@ -910,12 +901,10 @@ bool PlatformCALayerCocoa::filtersCanBeComposited(const FilterOperations& filter
     return true;
 }
 
-#if ENABLE(CSS_COMPOSITING)
 void PlatformCALayerCocoa::setBlendMode(BlendMode blendMode)
 {
     PlatformCAFilters::setBlendingFiltersOnLayer(platformLayer(), blendMode);
 }
-#endif
 
 void PlatformCALayerCocoa::setName(const String& value)
 {
@@ -963,6 +952,8 @@ void PlatformCALayerCocoa::setCornerRadius(float value)
 {
     BEGIN_BLOCK_OBJC_EXCEPTIONS
     [m_layer setCornerRadius:value];
+    if (value)
+        [m_layer setCornerCurve:kCACornerCurveCircular];
     END_BLOCK_OBJC_EXCEPTIONS
 }
 
@@ -1247,11 +1238,6 @@ void PlatformCALayer::drawLayerContents(GraphicsContext& graphicsContext, WebCor
         }
 
         {
-#if PLATFORM(MAC)
-            // It's important to get the clip from the context, because it may be significantly
-            // smaller than the layer bounds (e.g. tiled layers)
-            ThemeMac::setFocusRingClipRect(graphicsContext.clipBounds());
-#endif
             if (dirtyRects.size() == 1)
                 layerContents->platformCALayerPaintContents(platformCALayer, graphicsContext, dirtyRects[0], layerPaintBehavior);
             else {
@@ -1261,10 +1247,6 @@ void PlatformCALayer::drawLayerContents(GraphicsContext& graphicsContext, WebCor
                     layerContents->platformCALayerPaintContents(platformCALayer, graphicsContext, rect, layerPaintBehavior);
                 }
             }
-
-#if PLATFORM(MAC)
-            ThemeMac::setFocusRingClipRect(FloatRect());
-#endif
         }
     }
 

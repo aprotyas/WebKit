@@ -55,13 +55,13 @@ namespace WebCore {
 WTF_MAKE_ISO_ALLOCATED_IMPL(RenderFragmentContainer);
 
 RenderFragmentContainer::RenderFragmentContainer(Type type, Element& element, RenderStyle&& style, RenderFragmentedFlow* fragmentedFlow)
-    : RenderBlockFlow(type, element, WTFMove(style))
+    : RenderBlockFlow(type, element, WTFMove(style), BlockFlowFlag::IsFragmentContainer)
     , m_fragmentedFlow(fragmentedFlow)
 {
 }
 
 RenderFragmentContainer::RenderFragmentContainer(Type type, Document& document, RenderStyle&& style, RenderFragmentedFlow* fragmentedFlow)
-    : RenderBlockFlow(type, document, WTFMove(style))
+    : RenderBlockFlow(type, document, WTFMove(style), BlockFlowFlag::IsFragmentContainer)
     , m_fragmentedFlow(fragmentedFlow)
 {
 }
@@ -496,14 +496,12 @@ void RenderFragmentContainer::addVisualOverflowForBox(const RenderBox* box, cons
 
 LayoutRect RenderFragmentContainer::visualOverflowRectForBox(const RenderBoxModelObject& box) const
 {
-    if (is<RenderInline>(box)) {
-        const RenderInline& inlineBox = downcast<RenderInline>(box);
-        return inlineBox.linesVisualOverflowBoundingBoxInFragment(this);
-    }
+    if (CheckedPtr inlineBox = dynamicDowncast<RenderInline>(box))
+        return inlineBox->linesVisualOverflowBoundingBoxInFragment(this);
 
-    if (is<RenderBox>(box)) {
+    if (CheckedPtr renderBox = dynamicDowncast<RenderBox>(box)) {
         RefPtr<RenderOverflow> overflow;
-        ensureOverflowForBox(&downcast<RenderBox>(box), overflow, true);
+        ensureOverflowForBox(renderBox.get(), overflow, true);
 
         ASSERT(overflow);
         return overflow->visualOverflowRect();
