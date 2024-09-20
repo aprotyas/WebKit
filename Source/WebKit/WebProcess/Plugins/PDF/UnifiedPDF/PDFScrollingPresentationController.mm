@@ -174,7 +174,7 @@ void PDFScrollingPresentationController::setupLayers(GraphicsLayer& scrolledCont
 #endif
 }
 
-void PDFScrollingPresentationController::updateLayersOnLayoutChange(FloatSize documentSize, FloatSize centeringOffset, double scaleFactor)
+void PDFScrollingPresentationController::updateLayersOnLayoutChange(FloatSize documentSize, FloatSize centeringOffset, double scaleFactor, LayoutChangeInformation layoutChangeInformation)
 {
     m_contentsLayer->setSize(documentSize);
     m_contentsLayer->setNeedsDisplay();
@@ -184,6 +184,13 @@ void PDFScrollingPresentationController::updateLayersOnLayoutChange(FloatSize do
     m_selectionLayer->setNeedsDisplay();
 #endif
 
+    if (layoutChangeInformation.scaleFactorChangedAfterInitialLayout()) {
+        // FIXME [aprotyas]: Maybe call this asyncRenderer->tileConfigurationWillChange?
+        // FIXME [aprotyas]: Does it matter which order I make this call? Relative to `m_contentsLayer->setTransform(...)`?
+        // FIXME [aprotyas]: Maybe we don't need to do this for the _first ever_ update?
+        if (RefPtr asyncRenderer = asyncRendererIfExists())
+            asyncRenderer->pdfContentScaleChanged(m_contentsLayer.get(), scaleFactor);
+    }
     TransformationMatrix transform;
     transform.scale(scaleFactor);
     transform.translate(centeringOffset.width(), centeringOffset.height());

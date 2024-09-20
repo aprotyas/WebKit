@@ -105,6 +105,7 @@ void TileCoverageMap::update()
         scale = std::min(widthScale, visibleHeight / containerBounds.height());
     }
 
+    // FIXME [aprotyas]: Should this be the pending tile grid when appropriate?
     float indicatorScale = scale * m_controller.tileGrid().scale();
 
     FloatRect mapBounds = containerBounds;
@@ -162,6 +163,7 @@ PlatformLayerIdentifier TileCoverageMap::platformCALayerIdentifier() const
 
 void TileCoverageMap::platformCALayerPaintContents(PlatformCALayer* platformCALayer, GraphicsContext& context, const FloatRect&, OptionSet<GraphicsLayerPaintBehavior>)
 {
+    // FIXME [aprotyas]: Should this be the pending tile grid when appropriate?
     ASSERT_UNUSED(platformCALayer, platformCALayer == m_layer.ptr());
     m_controller.tileGrid().drawTileMapContents(context.platformContext(), m_layer.get().bounds());
 }

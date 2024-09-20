@@ -116,6 +116,8 @@ public:
     // Updates existing tiles. Can result in temporarily stale content.
     void pdfContentChangedInRect(const WebCore::GraphicsLayer*, float pageScaleFactor, const WebCore::FloatRect& paintingRect, std::optional<PDFLayoutRow>);
 
+    void pdfContentScaleChanged(const WebCore::GraphicsLayer*, float newScaleFactor);
+
     void generatePreviewImageForPage(PDFDocumentLayout::PageIndex, float scale);
     RefPtr<WebCore::ImageBuffer> previewImageForPage(PDFDocumentLayout::PageIndex) const;
     void removePreviewForPage(PDFDocumentLayout::PageIndex);
@@ -142,6 +144,7 @@ private:
 
     bool renderInfoIsValidForTile(WebCore::TiledBacking&, const TileForGrid&, const TileRenderInfo&) const;
 
+    // FIXME [aprotyas]: See where the will[Repaint|Remove|RepaintAll]Tile[s] calls come from?
     // TiledBackingClient
     void willRepaintTile(WebCore::TiledBacking&, WebCore::TileGridIdentifier, WebCore::TileIndex, const WebCore::FloatRect& tileRect, const WebCore::FloatRect& tileDirtyRect) final;
     void willRemoveTile(WebCore::TiledBacking&, WebCore::TileGridIdentifier, WebCore::TileIndex) final;
@@ -152,6 +155,15 @@ private:
 
     void didAddGrid(WebCore::TiledBacking&, WebCore::TileGridIdentifier) final;
     void willRemoveGrid(WebCore::TiledBacking&, WebCore::TileGridIdentifier) final;
+
+    void tileConfigurationChangeCompletionHandler(WebCore::TileGridIdentifier, WebCore::TileGridIdentifier, WebCore::DidCancelTileConfigurationChange);
+        
+    void prepareContentForTile(WebCore::TiledBacking&, WebCore::TileGridIdentifier, WebCore::TileIndex, const WebCore::FloatRect& tileClip, WebCore::TileConfigurationChangeIdentifier, CompletionHandler<void(WebCore::TileIndex)>&&) final;
+    void didPrepareContentForTile(TileForGrid);
+    void cancelPrepareContentForTile(WebCore::TiledBacking&, WebCore::TileGridIdentifier, WebCore::TileIndex, WebCore::TileConfigurationChangeIdentifier) final;
+    void didCancelTileConfigurationChange(WebCore::TileConfigurationChangeIdentifier) final;
+
+    bool isPDFClient() const final { return true; }
 
     void enqueueTilePaintIfNecessary(const WebCore::TiledBacking&, const TileForGrid&, const WebCore::FloatRect& tileRect, const std::optional<WebCore::FloatRect>& clipRect = { });
     void enqueuePaintWithClip(const TileForGrid&, const TileRenderInfo&);
@@ -215,6 +227,9 @@ private:
 
     PDFPageIndexToPreviewHash m_enqueuedPagePreviews;
     PDFPageIndexToBufferHash m_pagePreviews;
+
+    std::optional<WebCore::TileConfigurationChangeIdentifier> m_currentTileConfigurationChange;
+    HashMap<TileForGrid, CompletionHandler<void(WebCore::TileIndex)>> m_tileContentPreparationCallbacks;
 
     std::atomic<bool> m_showDebugBorders { false };
 };

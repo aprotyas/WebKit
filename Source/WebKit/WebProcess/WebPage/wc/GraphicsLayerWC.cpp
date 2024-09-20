@@ -98,6 +98,9 @@ public:
     void setClient(TiledBackingClient*) final { }
     PlatformLayerIdentifier layerIdentifier() const final { return *m_owner.primaryLayerID(); }
     TileGridIdentifier primaryGridIdentifier() const final { return TileGridIdentifier { 0 }; }
+    std::optional<TileConfigurationChangeIdentifier> activeConfigurationChange() const final { return { }; }
+    TileConfigurationChangeIdentifier startTileConfigurationChange() final { return TileConfigurationChangeIdentifier { 0 }; }
+    void endTileConfigurationChange(TileConfigurationChangeIdentifier, EndTileConfigurationChangeCallback&& callback) final { callback({ TileGridIdentifier { 0 }, TileGridIdentifier { 0 } }); }
     std::optional<TileGridIdentifier> secondaryGridIdentifier() const final { return { }; }
     void setVisibleRect(const FloatRect&) final { }
     FloatRect visibleRect() const final { return { }; };

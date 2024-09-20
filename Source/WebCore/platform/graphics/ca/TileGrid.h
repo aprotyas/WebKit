@@ -29,6 +29,7 @@
 #include "IntRect.h"
 #include "PlatformCALayerClient.h"
 #include "TileGridIdentifier.h"
+#include "TileGridTypes.h"
 #include "Timer.h"
 #include <wtf/Deque.h>
 #include <wtf/HashCountedSet.h>
@@ -45,8 +46,6 @@ namespace WebCore {
 class GraphicsContext;
 class PlatformCALayer;
 class TileController;
-
-using TileIndex = IntPoint;
 
 class TileGrid : public PlatformCALayerClient {
     WTF_MAKE_TZONE_ALLOCATED(TileGrid);
@@ -100,14 +99,14 @@ public:
     void removeUnparentedTilesNow();
 #endif
 
-    using TileCohort = unsigned;
-    static constexpr TileCohort visibleTileCohort = std::numeric_limits<TileCohort>::max();
+    using TileCohort = WebCore::TileCohort;
+    static constexpr auto visibleTileCohort = WebCore::visibleTileCohort;
 
-    struct TileInfo {
-        RefPtr<PlatformCALayer> layer;
-        TileCohort cohort { visibleTileCohort };
-        bool hasStaleContent { false };
-    };
+    using TileInfo = WebCore::TileInfo;
+
+    bool m_isPending { false };
+
+    void doMyAssert() const;
 
 private:
     void setTileNeedsDisplayInRect(const TileIndex&, TileInfo&, const IntRect& repaintRectInTileCoords, const IntRect& coverageRectInTileCoords);
@@ -155,13 +154,15 @@ private:
     bool isUsingDisplayListDrawing(PlatformCALayer*) const override;
     bool platformCALayerNeedsPlatformContext(const PlatformCALayer*) const override;
 
+//    void updateActiveConfigurationChangeTimerFired();
+
     TileGridIdentifier m_identifier;
     TileController& m_controller;
 #if USE(CA)
     Ref<PlatformCALayer> m_containerLayer;
 #endif
 
-    HashMap<TileIndex, TileInfo> m_tiles;
+    TileGridIndexCollectionType m_tiles;
 
     IntRect m_primaryTileCoverageRect;
     Vector<FloatRect> m_secondaryTileCoverageRects;
@@ -169,6 +170,7 @@ private:
     Deque<TileCohortInfo> m_cohortList;
 
     Timer m_cohortRemovalTimer;
+//    DeferrableOneShotTimer m_updateActiveConfigurationChangeTimer;
 
     HashCountedSet<PlatformCALayer*> m_tileRepaintCounts;
     

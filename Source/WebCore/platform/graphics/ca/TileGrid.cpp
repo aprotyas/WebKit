@@ -79,8 +79,20 @@ TileGrid::~TileGrid()
         tile.layer->setOwner(nullptr);
 }
 
+void TileGrid::doMyAssert() const
+{
+    if (m_controller.hasPDFClient()) {
+        if (m_controller.activeConfigurationChange()) {
+            ASSERT(m_isPending);
+            return;
+        }
+    }
+    ASSERT(!m_isPending);
+}
+
 FloatRect TileGrid::rectForTile(TileIndex tileIndex) const
 {
+    doMyAssert();
     return rectForTileIndex(tileIndex);
 }
 
@@ -94,6 +106,13 @@ void TileGrid::setIsZoomedOutTileGrid(bool isZoomedOutGrid)
 
 void TileGrid::setScale(float scale)
 {
+    doMyAssert();
+
+    // FIXME [aprotyas]: Record when m_tiles is being modified to understand if it's safe to just lift the tile indices for async data.
+    if (m_controller.hasPDFClient()) {
+        ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] TileGrid::setScale " << &m_controller << " -- " << scale << " controller has async tile change data " << (m_controller.activeConfigurationChange() ? "YES" : "NO"));
+//        WTFReportBacktraceWithPrefix("[aprotyas]");
+    }
     m_scale = scale;
 
     TransformationMatrix transform;
@@ -112,6 +131,7 @@ void TileGrid::setScale(float scale)
 
 void TileGrid::setNeedsDisplay()
 {
+    doMyAssert();
     for (auto& entry : m_tiles) {
         TileIndex tileIndex = entry.key;
         TileInfo& tileInfo = entry.value;
@@ -127,6 +147,7 @@ void TileGrid::setNeedsDisplay()
 
 void TileGrid::setNeedsDisplayInRect(const IntRect& rect)
 {
+    doMyAssert();
     if (m_tiles.isEmpty())
         return;
 
@@ -159,6 +180,7 @@ void TileGrid::setNeedsDisplayInRect(const IntRect& rect)
 
 void TileGrid::dropTilesInRect(const IntRect& rect)
 {
+    doMyAssert();
     if (m_tiles.isEmpty())
         return;
 
@@ -178,6 +200,7 @@ void TileGrid::dropTilesInRect(const IntRect& rect)
 
 void TileGrid::setTileNeedsDisplayInRect(const TileIndex& tileIndex, TileInfo& tileInfo, const IntRect& repaintRectInTileCoords, const IntRect& coverageRectInTileCoords)
 {
+    doMyAssert();
     PlatformCALayer* tileLayer = tileInfo.layer.get();
 
     IntRect tileRect = rectForTileIndex(tileIndex);
@@ -205,6 +228,7 @@ void TileGrid::setTileNeedsDisplayInRect(const TileIndex& tileIndex, TileInfo& t
 
 void TileGrid::updateTileLayerProperties()
 {
+    doMyAssert();
     bool acceleratesDrawing = m_controller.acceleratesDrawing();
     bool deepColor = m_controller.wantsDeepColorBackingStore();
     bool opaque = m_controller.tilesAreOpaque();
@@ -221,6 +245,7 @@ void TileGrid::updateTileLayerProperties()
 
 bool TileGrid::tilesWouldChangeForCoverageRect(const FloatRect& coverageRect) const
 {
+    doMyAssert();
     if (coverageRect.isEmpty())
         return false;
 
@@ -241,6 +266,7 @@ bool TileGrid::tilesWouldChangeForCoverageRect(const FloatRect& coverageRect) co
 
 bool TileGrid::prepopulateRect(const FloatRect& rect)
 {
+    doMyAssert();
     LOG_WITH_STREAM(Tiling, stream << "TileGrid " << this << " prepopulateRect: " << rect);
 
     IntRect enclosingCoverageRect = enclosingIntRectPreservingEmptyRects(rect);
@@ -253,6 +279,7 @@ bool TileGrid::prepopulateRect(const FloatRect& rect)
 
 IntRect TileGrid::rectForTileIndex(const TileIndex& tileIndex) const
 {
+    doMyAssert();
     // FIXME: calculating the scaled size here should match with the rest of calculated sizes where we use the combination of
     // enclosingIntRect, expandedIntSize (floor vs ceil).
     // However enclosing this size could reveal gap on root layer's background. see RenderView::backgroundRect()
@@ -266,6 +293,7 @@ IntRect TileGrid::rectForTileIndex(const TileIndex& tileIndex) const
 
 bool TileGrid::getTileIndexRangeForRect(const IntRect& rect, TileIndex& topLeft, TileIndex& bottomRight) const
 {
+    doMyAssert();
     IntRect clampedRect = m_controller.bounds();
     clampedRect.scale(m_scale);
     clampedRect.intersect(rect);
@@ -295,6 +323,7 @@ bool TileGrid::getTileIndexRangeForRect(const IntRect& rect, TileIndex& topLeft,
 
 unsigned TileGrid::blankPixelCount() const
 {
+    doMyAssert();
     PlatformLayerList tiles(m_tiles.size());
     for (auto& tile : m_tiles.values()) {
         if (auto layer = tile.layer->platformLayer())
@@ -305,6 +334,7 @@ unsigned TileGrid::blankPixelCount() const
 
 void TileGrid::removeTiles(const Vector<TileIndex>& toRemove)
 {
+    doMyAssert();
     for (size_t i = 0; i < toRemove.size(); ++i) {
         auto tileIndex = toRemove[i];
         TileInfo tileInfo = m_tiles.take(tileIndex);
@@ -317,11 +347,13 @@ void TileGrid::removeTiles(const Vector<TileIndex>& toRemove)
 
 void TileGrid::removeAllTiles()
 {
+    doMyAssert();
     removeTiles(copyToVector(m_tiles.keys()));
 }
 
 void TileGrid::removeAllSecondaryTiles()
 {
+    doMyAssert();
     Vector<TileIndex> tilesToRemove;
 
     for (auto& entry : m_tiles) {
@@ -336,6 +368,7 @@ void TileGrid::removeAllSecondaryTiles()
 
 void TileGrid::removeTilesInCohort(TileCohort cohort)
 {
+    doMyAssert();
     ASSERT(cohort != visibleTileCohort);
     Vector<TileIndex> tilesToRemove;
 
@@ -351,10 +384,19 @@ void TileGrid::removeTilesInCohort(TileCohort cohort)
 
 void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
 {
+    doMyAssert();
+    // FIXME [aprotyas]: For things that we ask back to the controller, we need to think about what version of the data we're getting?
     FloatRect coverageRect = m_controller.coverageRect();
     IntRect bounds = m_controller.bounds();
+    
+    auto tilesBefore = copyToVector(m_tiles.keys());
 
-    LOG_WITH_STREAM(Tiling, stream << "TileGrid " << this << " (controller " << &m_controller << ") revalidateTiles: bounds " << bounds << " coverageRect" << coverageRect << " validation: " << validationPolicy);
+    LOG_WITH_STREAM(Tiling, stream << "TileGrid " << this << " (controller " << &m_controller << ") revalidateTiles: bounds " << bounds << " coverageRect " << coverageRect << " validation: " << validationPolicy);
+    if (m_controller.hasPDFClient()) {
+//        WTFReportBacktraceWithPrefix("[aprotyas]");
+        ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] TileGrid " << this << " (controller " << &m_controller << ") revalidateTiles: bounds " << bounds << " coverageRect " << coverageRect << " validation: " << validationPolicy << " scale " << m_scale);
+    }
+    // FIXME [aprotyas]: Verify if tiles change here or not? If so, maybe we want to add a hook in TileController::didRevalidateTiles, where we populate our set of pending tiles (by asking that info of the TileGrid)?
 
     FloatRect scaledRect(coverageRect);
     scaledRect.scale(m_scale);
@@ -495,11 +537,78 @@ void TileGrid::revalidateTiles(OptionSet<ValidationPolicyFlag> validationPolicy)
         m_secondaryTileCoverageRects.clear();
     }
 
-    m_controller.didRevalidateTiles();
+    if (m_controller.hasPDFClient()) {
+        auto tilesAfter = copyToVector(m_tiles.keys());
+        auto pendingTiles = m_controller.pendingTilesFromActiveConfigurationChange();
+
+        bool tilesChanged = true;
+        if (tilesBefore.size() == tilesAfter.size()) {
+            for (size_t idx1 = 0; idx1 < tilesBefore.size(); ++idx1) {
+                auto beforeVal = tilesBefore[idx1];
+                bool matchFound = false;
+                for (size_t idx2 = 0; idx2 < tilesAfter.size(); ++idx2) {
+                    auto afterVal = tilesAfter[idx2];
+                    if (beforeVal == afterVal)
+                        matchFound = true;
+                }
+
+                if (!matchFound)
+                    break;
+            }
+            tilesChanged = false;
+        }
+
+        bool tilesChangedFromPending = true;
+        if (tilesAfter.size() == pendingTiles.size()) {
+            for (size_t idx1 = 0; idx1 < tilesAfter.size(); ++idx1) {
+                auto beforeVal = tilesAfter[idx1];
+                bool matchFound = false;
+                for (size_t idx2 = 0; idx2 < pendingTiles.size(); ++idx2) {
+                    auto afterVal = pendingTiles[idx2];
+                    if (beforeVal == afterVal)
+                        matchFound = true;
+                }
+
+                if (!matchFound)
+                    break;
+            }
+            tilesChangedFromPending = false;
+        }
+
+        TextStream ts;
+        ts << "[aprotyas] TileGrid::revalidateTiles -- tiles before { ";
+        for (const auto& tile : tilesBefore) {
+            ts << tile << ", ";
+        }
+        ts << " }, tiles after { ";
+        for (const auto& tile : tilesAfter) {
+            ts << tile << ", ";
+        }
+        ts << " }, pending tiles { ";
+        for (const auto& tile : pendingTiles) {
+            ts << tile << ", ";
+        }
+        ts << " }";
+
+        ALWAYS_LOG_WITH_STREAM(stream << ts.release());
+        
+        if (tilesChanged)
+            ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] TileGrid::revalidateTiles -- tiles changed before/after revalidation");
+        else
+            ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] TileGrid::revalidateTiles -- tiles did NOT change before/after revalidation");
+
+        if (tilesChangedFromPending)
+            ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] TileGrid::revalidateTiles -- tiles changed from pending");
+        else
+            ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] TileGrid::revalidateTiles -- tiles did NOT change from pending");
+    }
+
+    m_controller.didRevalidateTiles(m_tiles.keys());
 }
 
 TileGrid::TileCohort TileGrid::nextTileCohort() const
 {
+    doMyAssert();
     if (!m_cohortList.isEmpty())
         return m_cohortList.last().cohort + 1;
 
@@ -508,6 +617,7 @@ TileGrid::TileCohort TileGrid::nextTileCohort() const
 
 void TileGrid::startedNewCohort(TileCohort cohort)
 {
+    doMyAssert();
     m_cohortList.append(TileCohortInfo(cohort, MonotonicTime::now()));
 #if PLATFORM(IOS_FAMILY)
     if (!m_controller.isInWindow())
@@ -517,16 +627,19 @@ void TileGrid::startedNewCohort(TileCohort cohort)
 
 TileGrid::TileCohort TileGrid::newestTileCohort() const
 {
+    doMyAssert();
     return m_cohortList.isEmpty() ? 0 : m_cohortList.last().cohort;
 }
 
 TileGrid::TileCohort TileGrid::oldestTileCohort() const
 {
+    doMyAssert();
     return m_cohortList.isEmpty() ? 0 : m_cohortList.first().cohort;
 }
 
 void TileGrid::scheduleCohortRemoval()
 {
+    doMyAssert();
     const Seconds cohortRemovalTimerSeconds { 1_s };
 
     // Start the timer, or reschedule the timer from now if it's already active.
@@ -543,6 +656,7 @@ Seconds TileGrid::TileCohortInfo::timeUntilExpiration()
 
 void TileGrid::cohortRemovalTimerFired()
 {
+    doMyAssert();
     if (m_cohortList.isEmpty()) {
         m_cohortRemovalTimer.stop();
         return;
@@ -558,6 +672,7 @@ void TileGrid::cohortRemovalTimerFired()
 
 IntRect TileGrid::ensureTilesForRect(const FloatRect& rect, CoverageType newTileType)
 {
+    doMyAssert();
     if (!m_controller.isInWindow())
         return IntRect();
 
@@ -624,6 +739,7 @@ IntRect TileGrid::ensureTilesForRect(const FloatRect& rect, CoverageType newTile
 
 IntRect TileGrid::extent() const
 {
+    doMyAssert();
     TileIndex topLeft;
     TileIndex bottomRight;
     if (getTileIndexRangeForRect(m_primaryTileCoverageRect, topLeft, bottomRight)) {
@@ -636,6 +752,7 @@ IntRect TileGrid::extent() const
 
 double TileGrid::retainedTileBackingStoreMemory() const
 {
+    doMyAssert();
     double totalBytes = 0;
     for (auto& tileInfo : m_tiles.values()) {
         if (tileInfo.layer->superlayer()) {
@@ -650,6 +767,7 @@ double TileGrid::retainedTileBackingStoreMemory() const
 // Return the rect in layer coords, not tile coords.
 IntRect TileGrid::tileCoverageRect() const
 {
+    doMyAssert();
     IntRect coverageRectInLayerCoords(m_primaryTileCoverageRect);
     coverageRectInLayerCoords.scale(1 / m_scale);
     return coverageRectInLayerCoords;
@@ -657,6 +775,7 @@ IntRect TileGrid::tileCoverageRect() const
 
 void TileGrid::drawTileMapContents(CGContextRef context, CGRect layerBounds) const
 {
+    doMyAssert();
     CGContextSetRGBFillColor(context, 0.3, 0.3, 0.3, 1);
     CGContextFillRect(context, layerBounds);
 
@@ -717,11 +836,13 @@ void TileGrid::drawTileMapContents(CGContextRef context, CGRect layerBounds) con
 
 PlatformLayerIdentifier TileGrid::platformCALayerIdentifier() const
 {
+    doMyAssert();
     return m_controller.layerIdentifier();
 }
 
 void TileGrid::platformCALayerPaintContents(PlatformCALayer* platformCALayer, GraphicsContext& context, const FloatRect&, OptionSet<GraphicsLayerPaintBehavior> layerPaintBehavior)
 {
+    doMyAssert();
 #if PLATFORM(IOS_FAMILY)
     if (pthread_main_np())
         WebThreadLock();
@@ -758,6 +879,7 @@ void TileGrid::platformCALayerPaintContents(PlatformCALayer* platformCALayer, Gr
 
 float TileGrid::platformCALayerDeviceScaleFactor() const
 {
+    doMyAssert();
     if (auto* layerOwner = m_controller.rootLayer().owner())
         return layerOwner->platformCALayerDeviceScaleFactor();
     return 1.0f;
@@ -765,6 +887,7 @@ float TileGrid::platformCALayerDeviceScaleFactor() const
 
 bool TileGrid::platformCALayerShowDebugBorders() const
 {
+    doMyAssert();
     if (auto* layerOwner = m_controller.rootLayer().owner())
         return layerOwner->platformCALayerShowDebugBorders();
     return false;
@@ -772,6 +895,7 @@ bool TileGrid::platformCALayerShowDebugBorders() const
 
 bool TileGrid::platformCALayerShowRepaintCounter(PlatformCALayer*) const
 {
+    doMyAssert();
     if (auto* layerOwner = m_controller.rootLayer().owner())
         return layerOwner->platformCALayerShowRepaintCounter(nullptr);
     return false;
@@ -779,6 +903,7 @@ bool TileGrid::platformCALayerShowRepaintCounter(PlatformCALayer*) const
 
 bool TileGrid::isUsingDisplayListDrawing(PlatformCALayer*) const
 {
+    doMyAssert();
     if (auto* layerOwner = m_controller.rootLayer().owner())
         return layerOwner->isUsingDisplayListDrawing(nullptr);
     return false;
@@ -786,6 +911,7 @@ bool TileGrid::isUsingDisplayListDrawing(PlatformCALayer*) const
 
 bool TileGrid::platformCALayerNeedsPlatformContext(const PlatformCALayer* layer) const
 {
+    doMyAssert();
     if (auto* layerOwner = m_controller.rootLayer().owner())
         return layerOwner->platformCALayerNeedsPlatformContext(layer);
     return false;
@@ -793,22 +919,26 @@ bool TileGrid::platformCALayerNeedsPlatformContext(const PlatformCALayer* layer)
 
 bool TileGrid::platformCALayerContentsOpaque() const
 {
+    doMyAssert();
     return m_controller.tilesAreOpaque();
 }
 
 int TileGrid::platformCALayerRepaintCount(PlatformCALayer* platformCALayer) const
 {
+    doMyAssert();
     return m_tileRepaintCounts.count(platformCALayer);
 }
 
 int TileGrid::platformCALayerIncrementRepaintCount(PlatformCALayer* platformCALayer)
 {
+    doMyAssert();
     return m_tileRepaintCounts.add(platformCALayer).iterator->value;
 }
 
 #if PLATFORM(IOS_FAMILY)
 void TileGrid::removeUnparentedTilesNow()
 {
+    doMyAssert();
     while (!m_cohortList.isEmpty())
         removeTilesInCohort(m_cohortList.takeFirst().cohort);
 }

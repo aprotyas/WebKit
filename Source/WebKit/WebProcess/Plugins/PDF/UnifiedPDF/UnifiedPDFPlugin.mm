@@ -130,10 +130,6 @@
 #import <UIKit/UIColor.h>
 #endif
 
-// FIXME: We should rationalize these with the values in ViewGestureController.
-// For now, we'll leave them differing as they do in PDFPlugin.
-static constexpr double minimumZoomScale = 0.2;
-static constexpr double maximumZoomScale = 6.0;
 static constexpr double zoomIncrement = 1.18920;
 
 namespace WebKit {
@@ -584,7 +580,7 @@ void UnifiedPDFPlugin::updateLayerHierarchy()
     m_scrollContainerLayer->setPosition(scrollContainerRect.location());
     m_scrollContainerLayer->setSize(scrollContainerRect.size());
 
-    m_presentationController->updateLayersOnLayoutChange(documentSize(), centeringOffset(), m_scaleFactor);
+    m_presentationController->updateLayersOnLayoutChange(documentSize(), centeringOffset(), m_scaleFactor, { });
     updateSnapOffsets();
 
     didChangeSettings();
@@ -1048,7 +1044,7 @@ void UnifiedPDFPlugin::didEndMagnificationGesture()
     deviceOrPageScaleFactorChanged();
 }
 
-void UnifiedPDFPlugin::setScaleFactor(double scale, std::optional<WebCore::IntPoint> originInRootViewCoordinates)
+void UnifiedPDFPlugin::setScaleFactor(double scale, std::optional<WebCore::IntPoint> originInRootViewCoordinates, IsInitialLayout isInitialLayout)
 {
     RefPtr page = this->page();
     if (!page)
@@ -1088,7 +1084,7 @@ void UnifiedPDFPlugin::setScaleFactor(double scale, std::optional<WebCore::IntPo
 
     deviceOrPageScaleFactorChanged(CheckForMagnificationGesture::Yes);
 
-    m_presentationController->updateLayersOnLayoutChange(documentSize(), centeringOffset(), m_scaleFactor);
+    m_presentationController->updateLayersOnLayoutChange(documentSize(), centeringOffset(), m_scaleFactor,  { .scaleFactorChanged = true, .isInitialLayout = isInitialLayout == IsInitialLayout::Yes });
     updateSnapOffsets();
 
 #if PLATFORM(MAC)
@@ -1221,7 +1217,7 @@ void UnifiedPDFPlugin::updateLayout(AdjustScaleAfterLayout shouldAdjustScale, st
     if (shouldAdjustScale == AdjustScaleAfterLayout::Yes && m_view) {
         auto initialScaleFactor = initialScale();
         LOG_WITH_STREAM(PDF, stream << "UnifiedPDFPlugin::updateLayout - on first layout, chose scale for actual size " << initialScaleFactor);
-        setScaleFactor(initialScaleFactor);
+        setScaleFactor(initialScaleFactor, std::nullopt, IsInitialLayout::Yes);
 
         m_shouldUpdateAutoSizeScale = ShouldUpdateAutoSizeScale::No;
     }
@@ -2024,6 +2020,7 @@ void UnifiedPDFPlugin::animatedScrollDidEnd()
 
 bool UnifiedPDFPlugin::handleKeyboardEvent(const WebKeyboardEvent& event)
 {
+    // FIXME [aprotyas]: Should we check here?
     return m_presentationController->handleKeyboardEvent(event);
 }
 

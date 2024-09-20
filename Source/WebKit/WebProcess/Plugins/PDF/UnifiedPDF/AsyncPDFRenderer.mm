@@ -43,6 +43,8 @@ using namespace WebCore;
 
 WTF_MAKE_TZONE_ALLOCATED_IMPL(AsyncPDFRenderer);
 
+#define ASSERT_NOT_REACHED_BECAUSE_LAYER_IS_NOT_TILED(layerType) ASSERT_NOT_REACHED_WITH_MESSAGE("%s AsyncPDFRenderer expected to be used with tiled layers only. Got unexpected layer type %hhu", __PRETTY_FUNCTION__, std::to_underlying(layerType))
+
 Ref<AsyncPDFRenderer> AsyncPDFRenderer::create(PDFPresentationController& presentationController)
 {
     return adoptRef(*new AsyncPDFRenderer { presentationController });
@@ -214,8 +216,12 @@ bool AsyncPDFRenderer::renderInfoIsValidForTile(WebCore::TiledBacking& tiledBack
     return renderInfo.equivalentForPainting(currentRenderInfo);
 }
 
+#pragma mark TiledBackingClient
+
 void AsyncPDFRenderer::willRepaintTile(TiledBacking& tiledBacking, TileGridIdentifier gridIdentifier, TileIndex tileIndex, const FloatRect& tileRect, const FloatRect& tileDirtyRect)
 {
+    // FIXME [aprotyas]: We don't expect this to be called on the pending tile grid. Assert that.
+
     auto tileInfo = TileForGrid { gridIdentifier, tileIndex };
 
     auto haveValidTile = [&](const TileForGrid& tileInfo) {
@@ -232,6 +238,8 @@ void AsyncPDFRenderer::willRepaintTile(TiledBacking& tiledBacking, TileGridIdent
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::willRepaintTile " << tileInfo << " rect " << tileRect << " (dirty rect " << tileDirtyRect << ") - already queued "
         << m_currentValidTileRenders.contains(tileInfo) << " have cached tile " << m_rendereredTiles.contains(tileInfo) << " which is valid " << haveValidTile(tileInfo));
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::willRepaintTile " << tileInfo << " rect " << tileRect << " (dirty rect " << tileDirtyRect << ") - already queued "
+        << m_currentValidTileRenders.contains(tileInfo) << " have cached tile " << m_rendereredTiles.contains(tileInfo) << " which is valid " << haveValidTile(tileInfo));
 
     // If we have a tile, we can just paint it.
     if (haveValidTile(tileInfo))
@@ -246,9 +254,11 @@ void AsyncPDFRenderer::willRepaintTile(TiledBacking& tiledBacking, TileGridIdent
 
 void AsyncPDFRenderer::willRemoveTile(TiledBacking&, TileGridIdentifier gridIdentifier, TileIndex tileIndex)
 {
+    // FIXME [aprotyas]: Should this ask the TiledBacking to remove the pending tile from its async change?
     auto tileInfo = TileForGrid { gridIdentifier, tileIndex };
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::willRemoveTile " << tileInfo);
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::willRemoveTile " << tileInfo);
 
     m_requestWorkQueue.remove(tileInfo);
     m_currentValidTileRenders.remove(tileInfo);
@@ -257,6 +267,8 @@ void AsyncPDFRenderer::willRemoveTile(TiledBacking&, TileGridIdentifier gridIden
 
 void AsyncPDFRenderer::willRepaintAllTiles(TiledBacking&, TileGridIdentifier)
 {
+    // FIXME [aprotyas]: Should we cancelPrepareContentForTile for all tiles here too?
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::willRepaintAllTiles");
     clearRequestsAndCachedTiles();
 }
 
@@ -291,6 +303,47 @@ void AsyncPDFRenderer::coverageRectDidChange(TiledBacking& tiledBacking, const F
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::coverageRectDidChange " << coverageRect << " " << pageCoverage << " - preview scale " << pagePreviewScale << " - have " << m_pagePreviews.size() << " page previews and " << m_enqueuedPagePreviews.size() << " enqueued");
 }
 
+void AsyncPDFRenderer::tilingScaleFactorDidChange(TiledBacking&, float)
+{
+}
+
+void AsyncPDFRenderer::prepareContentForTile(TiledBacking& tiledBacking, TileGridIdentifier gridIdentifier, TileIndex tileIndex, const FloatRect& tileRect, TileConfigurationChangeIdentifier configurationChangeIdentifier, CompletionHandler<void(TileIndex)>&& completion)
+{
+    // Maybe we just store the completion handler in a map and call it when the painting is done?
+    // Or optimistically queue painting ourselves too. Doesn't hurt to call multiple times.
+    // FIXME [aprotyas]: Maybe we need to check whether the async config change is live?
+    ASSERT(m_currentTileConfigurationChange == configurationChangeIdentifier);
+    auto tileInfo = TileForGrid { gridIdentifier, tileIndex };
+    ASSERT(!m_tileContentPreparationCallbacks.contains(tileInfo));
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::prepareContentForTile -- adding tile " << tileInfo << " to callback map");
+    m_tileContentPreparationCallbacks.set(tileInfo, WTFMove(completion));
+//    willRepaintTile(tiledBacking, gridIdentifier, tileIndex, tileRect, tileRect);
+}
+
+void AsyncPDFRenderer::didPrepareContentForTile(TileForGrid tileInfo)
+{
+    // FIXME [aprotyas]: Maybe we need to check whether the async config change is live?
+    if (!m_currentTileConfigurationChange)
+        return;
+
+    ASSERT(m_tileContentPreparationCallbacks.contains(tileInfo));
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::didPrepareContentForTile -- removing tile " << tileInfo << " from callback map");
+    m_tileContentPreparationCallbacks.take(tileInfo)(tileInfo.tileIndex);
+}
+
+void AsyncPDFRenderer::cancelPrepareContentForTile(TiledBacking&, TileGridIdentifier, TileIndex, TileConfigurationChangeIdentifier)
+{
+    // FIXME [aprotyas]: What to do here? Can't ignore the completion handler associated with a tile.
+}
+
+void AsyncPDFRenderer::didCancelTileConfigurationChange(TileConfigurationChangeIdentifier changeIdentifier)
+{
+    ASSERT(m_currentTileConfigurationChange == changeIdentifier);
+    m_currentTileConfigurationChange.reset();
+}
+
+#pragma mark -
+
 void AsyncPDFRenderer::removePagePreviewsOutsideCoverageRect(const FloatRect& coverageRect, const std::optional<PDFLayoutRow>& layoutRow)
 {
     RefPtr presentationController = m_presentationController.get();
@@ -313,10 +366,6 @@ void AsyncPDFRenderer::removePagePreviewsOutsideCoverageRect(const FloatRect& co
 
     for (auto pageIndex : unwantedPageIndices)
         removePreviewForPage(pageIndex);
-}
-
-void AsyncPDFRenderer::tilingScaleFactorDidChange(TiledBacking&, float)
-{
 }
 
 void AsyncPDFRenderer::didAddGrid(TiledBacking& tiledBacking, TileGridIdentifier gridIdentifier)
@@ -421,6 +470,7 @@ auto AsyncPDFRenderer::renderInfoForTile(const TiledBacking& tiledBacking, const
     auto tilingScaleFactor = tiledBacking.tilingScaleFactor();
     auto paintingClipRect = convertTileRectToPaintingCoords(tileRect, tilingScaleFactor);
 
+    // FIXME [aprotyas]: Is it sufficient to just replace the layer here with the layer corresponding to the pending tile grid?
     std::optional<PDFLayoutRow> layoutRow;
     auto layerID = m_tileGridToLayerIDMap.getOptional(tileInfo.gridIdentifier);
     if (layerID)
@@ -454,6 +504,7 @@ void AsyncPDFRenderer::enqueuePaintWithClip(const TileForGrid& tileInfo, const T
     m_requestWorkQueue.appendOrMoveToLast(tileInfo);
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::enqueueTileRequest for tile " << tileInfo << " " << renderInfo.pageCoverage << " identifier " << renderIdentifier << " (" << m_requestWorkQueue.size() << " requests in queue)");
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::enqueueTileRequest for tile " << tileInfo << " " << renderInfo.pageCoverage << " identifier " << renderIdentifier << " (" << m_requestWorkQueue.size() << " requests in queue)");
 
     serviceRequestQueue();
 }
@@ -476,6 +527,7 @@ void AsyncPDFRenderer::serviceRequestQueue()
         TileRenderData renderData = it->value;
 
         LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::serviceRequestQueue - rendering tile " << tileInfo << " identifier " << renderData.renderIdentifier << " (" << m_numConcurrentTileRenders << " concurrent renders)");
+        ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::serviceRequestQueue - rendering tile " << tileInfo << " identifier " << renderData.renderIdentifier << " (" << m_numConcurrentTileRenders << " concurrent renders)");
 
         ++m_numConcurrentTileRenders;
 
@@ -485,6 +537,7 @@ void AsyncPDFRenderer::serviceRequestQueue()
     }
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::serviceRequestQueue() - " << m_numConcurrentTileRenders << " renders in flight, " << m_requestWorkQueue.size() << " in queue");
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::serviceRequestQueue() - " << m_numConcurrentTileRenders << " renders in flight, " << m_requestWorkQueue.size() << " in queue");
 }
 
 void AsyncPDFRenderer::paintTileOnWorkQueue(RetainPtr<PDFDocument>&& pdfDocument, const TileForGrid& tileInfo, const TileRenderInfo& renderInfo, PDFTileRenderIdentifier renderIdentifier)
@@ -512,6 +565,7 @@ void AsyncPDFRenderer::paintPDFIntoBuffer(RetainPtr<PDFDocument>&& pdfDocument, 
     ASSERT(!isMainRunLoop());
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::paintPDFIntoBuffer for tile " << tileInfo);
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::paintPDFIntoBuffer for tile " << tileInfo);
 
     auto& context = imageBuffer->context();
 
@@ -544,7 +598,8 @@ void AsyncPDFRenderer::paintPDFIntoBuffer(RetainPtr<PDFDocument>&& pdfDocument, 
         context.translate(destinationRect.minXMaxYCorner());
         context.scale({ 1, -1 });
 
-        LOG_WITH_STREAM(PDFAsyncRendering, stream << " tile " << tileInfo << " painting PDF page " << pageInfo.pageIndex << " into rect " << destinationRect << " with clip " << bufferRect);
+        LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::paintPDFIntoBuffer tile " << tileInfo << " painting PDF page " << pageInfo.pageIndex << " into rect " << destinationRect << " with clip " << bufferRect);
+        ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::paintPDFIntoBuffer " << tileInfo << " painting PDF page " << pageInfo.pageIndex << " into rect " << destinationRect << " with clip " << bufferRect);
         [pdfPage drawWithBox:kPDFDisplayBoxCropBox toContext:context.platformContext()];
     }
 }
@@ -584,6 +639,7 @@ void AsyncPDFRenderer::transferBufferToMainThread(RefPtr<ImageBuffer>&& imageBuf
     ASSERT(!isMainRunLoop());
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::transferBufferToMainThread for tile " << tileInfo);
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::transferBufferToMainThread for tile " << tileInfo);
 
     callOnMainRunLoop([weakThis = ThreadSafeWeakPtr { *this }, imageBuffer = WTFMove(imageBuffer), tileInfo, renderInfo, renderIdentifier]() mutable {
         RefPtr protectedThis = weakThis.get();
@@ -594,6 +650,8 @@ void AsyncPDFRenderer::transferBufferToMainThread(RefPtr<ImageBuffer>&& imageBuf
 
         RefPtr layer = protectedThis->layerForTileGrid(tileInfo.gridIdentifier);
 
+        // FIXME [aprotyas]: Do we run the ensuing `context.drawImageBuffer()` in the new mode?
+        protectedThis->didPrepareContentForTile(tileInfo);
         protectedThis->didCompleteTileRender(WTFMove(imageBuffer), tileInfo, renderInfo, renderIdentifier, layer.get());
 
         if (haveBuffer) {
@@ -627,6 +685,8 @@ void AsyncPDFRenderer::didCompleteTileRender(RefPtr<ImageBuffer>&& imageBuffer, 
 
     LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::didCompleteTileRender - got results for tile at " << tileInfo << " clip " << renderInfo.clipRect << " ident " << renderIdentifier
         << " (" << m_rendereredTiles.size() << " tiles in cache). Request revoked " << !requestWasValid);
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::didCompleteTileRender - got results for tile at " << tileInfo << " clip " << renderInfo.clipRect << " ident " << renderIdentifier
+        << " (" << m_rendereredTiles.size() << " tiles in cache). Request revoked " << !requestWasValid);
 
     if (!requestWasValid)
         return;
@@ -649,10 +709,12 @@ void AsyncPDFRenderer::didCompleteTileRender(RefPtr<ImageBuffer>&& imageBuffer, 
         auto renderedTilesIt = m_rendereredTiles.find(tileInfo);
         if (renderedTilesIt == m_rendereredTiles.end()) {
             LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::didCompleteTileRender - tile to be updated " << tileInfo << " has been removed");
+            ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::didCompleteTileRender - tile to be updated " << tileInfo << " has been removed");
             return;
         }
 
         LOG_WITH_STREAM(PDFAsyncRendering, stream << "AsyncPDFRenderer::didCompleteTileRender - updating tile " << tileInfo << " in rect " << *renderInfo.clipRect);
+        ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::didCompleteTileRender - updating tile " << tileInfo << " in rect " << *renderInfo.clipRect);
 
         RefPtr existingBuffer = renderedTilesIt->value.buffer;
         auto& context = existingBuffer->context();
@@ -741,6 +803,43 @@ void AsyncPDFRenderer::invalidateTilesForPaintingRect(float pageScaleFactor, con
     });
 }
 
+void AsyncPDFRenderer::tileConfigurationChangeCompletionHandler(TileGridIdentifier oldGrid, TileGridIdentifier newGrid, DidCancelTileConfigurationChange didCancelTileConfigurationChange)
+{
+    m_currentTileConfigurationChange.reset();
+
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] AsyncPDFRenderer::tileConfigurationChangeCompletionHandler -- oldGrid " << oldGrid << " newGrid " << newGrid << " didCancelTileConfigurationChange " << std::to_underlying(didCancelTileConfigurationChange));
+
+    if (didCancelTileConfigurationChange == DidCancelTileConfigurationChange::Yes)
+        return;
+
+    RefPtr layer = layerForTileGrid(oldGrid);
+    if (!layer)
+        return;
+
+    auto* tiledBacking = layer->tiledBacking();
+    if (!tiledBacking)
+        return;
+
+    tiledBacking->swapPrimaryGridWithPendingTileGrid(oldGrid, newGrid);
+}
+
+void AsyncPDFRenderer::pdfContentScaleChanged(const GraphicsLayer* layer, float)
+{
+    auto* tiledBacking = layer->tiledBacking();
+    if (!tiledBacking) {
+        // We only expect AsyncPDFRenderer to be used with tiled layers.
+        ASSERT_NOT_REACHED_BECAUSE_LAYER_IS_NOT_TILED(layer->type());
+        return;
+    }
+
+    // FIXME [aprotyas]: This CompletionHandler only has a finalizer for ease of development.
+    m_currentTileConfigurationChange = tiledBacking->makeTileConfigurationChange([this](TileGridIdentifier oldGrid, TileGridIdentifier newGrid, DidCancelTileConfigurationChange didCancelTileConfigurationChange) {
+        return tileConfigurationChangeCompletionHandler(oldGrid, newGrid, didCancelTileConfigurationChange);
+    });
+    
+    // FIXME [aprotyas]: Maybe we need to keep track of the pending tile grid identifier and its associated layer somehow? Over here?
+}
+
 void AsyncPDFRenderer::pdfContentChangedInRect(const GraphicsLayer* layer, float pageScaleFactor, const FloatRect& paintingRect, std::optional<PDFLayoutRow> layoutRow)
 {
     // FIXME: If our platform does not support partial updates (supportsPartialRepaint() is false) then this should behave
@@ -757,7 +856,7 @@ void AsyncPDFRenderer::pdfContentChangedInRect(const GraphicsLayer* layer, float
     auto* tiledBacking = layer->tiledBacking();
     if (!tiledBacking) {
         // We only expect AsyncPDFRenderer to be used with tiled layers.
-        ASSERT_NOT_REACHED();
+        ASSERT_NOT_REACHED_BECAUSE_LAYER_IS_NOT_TILED(layer->type());
         return;
     }
 

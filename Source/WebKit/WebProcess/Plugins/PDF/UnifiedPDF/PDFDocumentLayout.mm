@@ -375,6 +375,10 @@ auto PDFDocumentLayout::updateLayout(IntSize pluginSize, ShouldUpdateAutoSizeSca
     layoutUpdateChanges.set(LayoutUpdateChange::DocumentBounds, oldDocumentBounds != m_documentBounds);
 
     LOG_WITH_STREAM(PDF, stream << "PDFDocumentLayout::updateLayout() - plugin size " << pluginSize << " document bounds " << m_documentBounds << " scale " << m_scale);
+    
+    bool pageGeom = oldPageGeometry != m_pageGeometry;
+    bool docBound = oldDocumentBounds != m_documentBounds;
+    ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] PDFDocumentLayout::updateLayout() -- pageGeom changed -- " << pageGeom << " -- docBound changed -- " << docBound);
 
     return layoutUpdateChanges;
 }

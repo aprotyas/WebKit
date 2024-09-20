@@ -713,6 +713,20 @@ void PDFDiscretePresentationController::applyWheelEventDelta(FloatSize delta)
 
     ASSERT(m_transitionDirection);
     // FIXME: <https://webkit.org/b/276981> Should we consult NSScrollWheelMultiplier like ScrollingEffectsController does?
+    /*
+     static float scrollWheelMultiplier()
+     {
+         static float multiplier = -1;
+         if (multiplier < 0) {
+             multiplier = [[NSUserDefaults standardUserDefaults] floatForKey:@"NSScrollWheelMultiplier"];
+             if (multiplier <= 0)
+                 multiplier = 1;
+         }
+         return multiplier;
+     }
+     
+     delta.scale(scrollWheelMultiplier());
+     */
     m_stretchDistance = stretchDeltaConstrainedForTransitionDirection(m_stretchDistance + delta, *m_transitionDirection);
 
     LOG_WITH_STREAM(PDF, stream << "PDFDiscretePresentationController::applyWheelEventDelta " << delta << " - stretch " << m_stretchDistance);
@@ -1149,7 +1163,7 @@ FloatSize PDFDiscretePresentationController::rowContainerSize(const PDFLayoutRow
     return scaledRowBounds.size();
 }
 
-void PDFDiscretePresentationController::updateLayersOnLayoutChange(FloatSize documentSize, FloatSize centeringOffset, double scaleFactor)
+void PDFDiscretePresentationController::updateLayersOnLayoutChange(FloatSize documentSize, FloatSize centeringOffset, double scaleFactor, LayoutChangeInformation layoutChangeInformation)
 {
     LOG_WITH_STREAM(PDF, stream << "PDFDiscretePresentationController::updateLayersOnLayoutChange - documentSize " << documentSize << " centeringOffset " << centeringOffset);
 
@@ -1221,8 +1235,16 @@ void PDFDiscretePresentationController::updateLayersOnLayoutChange(FloatSize doc
             needsRepaint = true;
         }
 
-        if (needsRepaint)
+        if (needsRepaint) {
+            if (layoutChangeInformation.scaleFactorChangedAfterInitialLayout()) {
+                // FIXME [aprotyas]: Maybe call this asyncRenderer->tileConfigurationWillChange?
+                // FIXME [aprotyas]: Does it matter which order I make this call? Relative to `m_contentsLayer->setTransform(...)`?
+                // FIXME [aprotyas]: Maybe we don't need to do this for the _first ever_ update?
+                if (RefPtr asyncRenderer = asyncRendererIfExists())
+                    asyncRenderer->pdfContentScaleChanged(rowContentsLayer.get(), scaleFactor);
+            }
             rowContentsLayer->setNeedsDisplay();
+        }
 
 #if ENABLE(UNIFIED_PDF_SELECTION_LAYER)
         RefPtr rowSelectionLayer = row.selectionLayer;

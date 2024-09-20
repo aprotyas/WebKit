@@ -31,6 +31,7 @@
 #include "PlatformCALayer.h"
 #include "PlatformCALayerClient.h"
 #include "TiledBacking.h"
+#include "TileGridTypes.h"
 #include "Timer.h"
 #include "VelocityData.h"
 #include <wtf/Deque.h>
@@ -135,7 +136,7 @@ public:
 
     IntRect boundsAtLastRevalidate() const { return m_boundsAtLastRevalidate; }
     IntRect boundsAtLastRevalidateWithoutMargin() const;
-    void didRevalidateTiles();
+    void didRevalidateTiles(const TileGridIndexIteratorRange&);
 
     bool shouldAggressivelyRetainTiles() const;
     bool shouldTemporarilyRetainTileCohorts() const;
@@ -150,6 +151,8 @@ public:
     
     void logFilledVisibleFreshTile(unsigned blankPixelCount);
 
+    Vector<TileIndex> pendingTilesFromActiveConfigurationChange() const;
+
 private:
     TileGrid& tileGrid() { return *m_tileGrid; }
 
@@ -163,6 +166,14 @@ private:
 
     TileGridIdentifier primaryGridIdentifier() const final;
     std::optional<TileGridIdentifier> secondaryGridIdentifier() const final;
+
+    std::optional<TileConfigurationChangeIdentifier> activeConfigurationChange() const final;
+    TileConfigurationChangeIdentifier makeTileConfigurationChange(CompletionHandler<void(TileGridIdentifier oldGrid, TileGridIdentifier newGrid, DidCancelTileConfigurationChange)>&&) final;
+    void destroyExistingAsyncTileGridChange();
+    void didPrepareContentForTile(TileIndex) final;
+    void addPendingTilesToActiveConfigurationChangeIfNeeded(const TileGridIndexIteratorRange&);
+    bool hasPDFClient() const;
+    void swapPrimaryGridWithPendingTileGrid(TileGridIdentifier oldGrid, TileGridIdentifier newGrid) final;
 
     void setVisibleRect(const FloatRect&) final;
     void setLayoutViewportRect(std::optional<FloatRect>) final;
@@ -218,6 +229,21 @@ private:
     PlatformCALayer* m_tileCacheLayer;
 
     WeakPtr<TiledBackingClient> m_client;
+
+    struct DestructionLogger {
+        ~DestructionLogger() {
+            ALWAYS_LOG_WITH_STREAM(stream << "[aprotyas] DESTRUCTION!!!!");
+        }
+    };
+    
+    struct AsyncTileGridChangeData {
+        TileConfigurationChangeIdentifier tileConfigurationChange;
+        std::unique_ptr<TileGrid> pendingTileGrid;
+        CompletionHandler<void(TileGridIdentifier, TileGridIdentifier, DidCancelTileConfigurationChange)> completionHandler;
+        HashSet<TileIndex> pendingTiles;
+        DestructionLogger logger;
+    };
+    std::optional<AsyncTileGridChangeData> m_asyncTileGridChangeData;
 
     float m_zoomedOutContentsScale { 0 };
     float m_deviceScaleFactor;
