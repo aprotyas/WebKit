@@ -1382,9 +1382,9 @@ void PDFDiscretePresentationController::didGeneratePreviewForPage(PDFDocumentLay
 
 #pragma mark -
 
-auto PDFDiscretePresentationController::pdfPositionForCurrentView(bool preservePosition) const -> std::optional<VisiblePDFPosition>
+auto PDFDiscretePresentationController::pdfPositionForCurrentView(PreservePosition preservePosition) const -> std::optional<VisiblePDFPosition>
 {
-    if (!preservePosition)
+    if (preservePosition == PreservePosition::No)
         return { };
 
     auto& documentLayout = m_plugin->documentLayout();

@@ -145,7 +145,7 @@ private:
 
     void applyWheelEventDelta(FloatSize);
 
-    std::optional<VisiblePDFPosition> pdfPositionForCurrentView(bool preservePosition) const override;
+    std::optional<VisiblePDFPosition> pdfPositionForCurrentView(PreservePosition) const override;
     void restorePDFPosition(const VisiblePDFPosition&) override;
 
     void ensurePageIsVisible(PDFDocumentLayout::PageIndex) override;

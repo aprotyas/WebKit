@@ -1198,7 +1198,12 @@ void UnifiedPDFPlugin::updateLayout(AdjustScaleAfterLayout shouldAdjustScale, st
     auto autoSizeMode = shouldUpdateAutoSizeScaleOverride.value_or(m_didLayoutWithValidDocument ? m_shouldUpdateAutoSizeScale : ShouldUpdateAutoSizeScale::Yes);
 
     auto computeAnchoringInfo = [&] {
-        return m_presentationController->pdfPositionForCurrentView(shouldAdjustScale == AdjustScaleAfterLayout::Yes || autoSizeMode == ShouldUpdateAutoSizeScale::Yes);
+        auto preservePosition = [&] {
+            if (shouldAdjustScale == AdjustScaleAfterLayout::Yes || autoSizeMode == ShouldUpdateAutoSizeScale::Yes)
+                return PDFPresentationController::PreservePosition::Yes;
+            return PDFPresentationController::PreservePosition::No;
+        }();
+        return m_presentationController->pdfPositionForCurrentView(preservePosition);
     };
     auto anchoringInfo = computeAnchoringInfo();
 

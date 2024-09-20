@@ -363,9 +363,9 @@ std::optional<PDFDocumentLayout::PageIndex> PDFScrollingPresentationController::
 
 #pragma mark -
 
-auto PDFScrollingPresentationController::pdfPositionForCurrentView(bool preservePosition) const -> std::optional<VisiblePDFPosition>
+auto PDFScrollingPresentationController::pdfPositionForCurrentView(PreservePosition preservePosition) const -> std::optional<VisiblePDFPosition>
 {
-    if (!preservePosition)
+    if (preservePosition == PreservePosition::No)
         return { };
 
     auto& documentLayout = m_plugin->documentLayout();

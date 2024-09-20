@@ -99,7 +99,8 @@ public:
         WebCore::FloatPoint pagePoint;
     };
 
-    virtual std::optional<VisiblePDFPosition> pdfPositionForCurrentView(bool preservePosition = true) const = 0;
+    enum class PreservePosition : bool { No, Yes };
+    virtual std::optional<VisiblePDFPosition> pdfPositionForCurrentView(PreservePosition = PreservePosition::Yes) const = 0;
     virtual void restorePDFPosition(const VisiblePDFPosition&) = 0;
 
     virtual void ensurePageIsVisible(PDFDocumentLayout::PageIndex) = 0;
