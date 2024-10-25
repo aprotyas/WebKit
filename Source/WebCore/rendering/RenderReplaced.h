@@ -73,6 +73,8 @@ protected:
 
     void willBeDestroyed() override;
 
+    virtual void layoutShadowContent(const LayoutSize&);
+
 private:
     LayoutUnit computeConstrainedLogicalWidth(ShouldComputePreferred) const;
 

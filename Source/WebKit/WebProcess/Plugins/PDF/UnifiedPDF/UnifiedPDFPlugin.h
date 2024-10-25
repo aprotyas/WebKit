@@ -51,6 +51,7 @@ namespace WebCore {
 class FrameView;
 class PageOverlay;
 class PlatformWheelEvent;
+class ShadowRoot;
 
 enum class DelegatedScrollingMode : uint8_t;
 
@@ -627,6 +628,8 @@ private:
 #if ENABLE(UNIFIED_PDF_DATA_DETECTION)
     std::unique_ptr<PDFDataDetectorOverlayController> m_dataDetectorOverlayController;
 #endif
+
+    RefPtr<WebCore::ShadowRoot> m_shadowRoot;
 
     // FIXME: We should rationalize these with the values in ViewGestureController.
     // For now, we'll leave them differing as they do in PDFPlugin.
