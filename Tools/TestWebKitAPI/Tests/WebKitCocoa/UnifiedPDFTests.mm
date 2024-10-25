@@ -34,6 +34,7 @@
 #import "TestWKWebView.h"
 #import "UISideCompositingScope.h"
 #import "UnifiedPDFTestHelpers.h"
+#import "WKPrinting.h"
 #import "WKWebViewConfigurationExtras.h"
 #import <WebCore/ColorSerialization.h>
 #import <WebKit/WKNavigationDelegatePrivate.h>
@@ -240,6 +241,13 @@ UNIFIED_PDF_TEST(WebProcessShouldNotCrashWithUISideCompositingDisabled)
     EXPECT_FALSE([delegate webProcessCrashed]);
 }
 
+TEST_P(PrintWithJSExecutionOptionTests, PDFWithWindowPrintEmbeddedJS)
+{
+    RetainPtr webView = adoptNS([[TestWKWebView alloc] initWithFrame:CGRectMake(0, 0, 400, 400) configuration:configurationForWebViewTestingUnifiedPDF().get() addToWindow:YES]);
+    runTest(webView.get());
+}
+
+INSTANTIATE_TEST_SUITE_P(UnifiedPDF, PrintWithJSExecutionOptionTests, testing::Bool(), &PrintWithJSExecutionOptionTests::testNameGenerator);
 } // namespace TestWebKitAPI
 
 #endif // ENABLE(UNIFIED_PDF)
