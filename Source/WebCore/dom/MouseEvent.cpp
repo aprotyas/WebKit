@@ -172,11 +172,7 @@ bool MouseEvent::canTriggerActivationBehavior(const Event& event)
 
 MouseButton MouseEvent::button() const
 {
-    static constexpr std::array mouseButtonCases { MouseButton::None, MouseButton::PointerHasNotChanged, MouseButton::Left, MouseButton::Middle, MouseButton::Right };
-    const auto isKnownButton = WTF::anyOf(mouseButtonCases, [buttonValue = this->m_button](MouseButton button) {
-        return buttonValue == enumToUnderlyingType(button);
-    });
-    return isKnownButton ? static_cast<MouseButton>(m_button) : MouseButton::Other;
+    return buttonFromShort(m_button);
 }
 
 unsigned MouseEvent::which() const
